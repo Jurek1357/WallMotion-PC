@@ -926,16 +926,20 @@ class VideoWallpaperWindow(QWidget):
 
     def _blit_stretch(self, img: QImage, sw: int, sh: int) -> int:
         """Cover pres GDI StretchDIBits (rychly COLORONCOLOR rezim).
-        Buffer se kopiruje jen jednou (bytes -> c_char_p bez mezikopie),
-        BITMAPINFO je kesovane podle rozmeru videa."""
+        Zero-copy: predava se primo pointer na buffer QImage, bez kopie
+        celeho snimku (1080p RGB32 = ~8 MB na snimek). img zije po celou
+        dobu synchronniho volani, takze je to bezpecne. BITMAPINFO je
+        kesovane podle rozmeru videa."""
         scale = max(self._dw / sw, self._dh / sh)
         dw, dh = int(sw * scale), int(sh * scale)
         dx, dy = int((self._dw - dw) / 2), int((self._dh - dh) / 2)
-        n = img.sizeInBytes()
-        raw = bytes(img.constBits())
-        if len(raw) < n:
+        try:
+            ptr = int(img.constBits())
+        except Exception:
             return 0
-        buf = ctypes.c_char_p(raw)
+        if not ptr:
+            return 0
+        buf = ctypes.c_void_p(ptr)
         if self._bmi is None:
             self._bmi = self._make_bmi(sw, sh)
         return _GDI32.StretchDIBits(

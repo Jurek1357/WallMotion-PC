@@ -8,7 +8,8 @@ A lightweight Wallpaper Engine alternative for **Windows 10/11**:
 
 - **Image wallpaper** – auto-fitted to your exact screen resolution
 - **Video wallpaper** – loops behind the desktop icons, clicks pass through
-- **YouTube support** – paste a link, the video downloads in the background and sets itself as wallpaper (H264/VP9 up to 1080p, files up to 500 MB)
+- **YouTube support** – paste a link, the video downloads in the background and sets itself as wallpaper (H.264 only, up to 1080p, files up to 500 MB, always with an audio track)
+- **Volume control** – mute checkbox and volume slider apply immediately, even while the video is playing
 - **Dark / light themes** and **Czech / English UI**, remembered between launches
 - **Screen measurement** – detects resolution of all monitors (physical pixels, HiDPI aware)
 
@@ -34,7 +35,8 @@ Drop an image/video onto the window (or click to browse) and hit **Set as wallpa
 
 - **Stop / restore original** – stops the video and restores the previous wallpaper.
 - **Re-measure display** – re-detects resolution (e.g. after plugging in a monitor).
-- **YouTube field** – paste a link, hit the button, download runs on a background thread with progress in the status line.
+- **YouTube field** – paste a link, hit the button, download runs on a background thread with progress in the status line. Only genuine YouTube links are accepted. Downloads are stored in the `downloads/` folder next to the app (or .exe).
+- **Sound** – uncheck *Mute video sound* and set the volume with the slider; both act instantly. Note: videos whose picture and sound are separate tracks need `ffmpeg` for merging (`winget install ffmpeg`), otherwise the app tells you exactly that.
 - Language/theme dropdowns are at the top; everything (incl. last file and mute) is saved to `%USERPROFILE%\.live_wallpaper_config.json`.
 - Debug log (if anything misbehaves): `%TEMP%\live_wallpaper_debug.log`.
 
@@ -62,9 +64,10 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 ### Known limitations
 
 - Primary-monitor focused; multi-monitor spanning is a possible extension.
-- Video formats depend on Qt Multimedia codecs (mp4/H.264 works out of the box; AV1 files are refused with a message).
+- Video formats depend on Qt Multimedia codecs (mp4/H.264 works out of the box; AV1/VP9 files are refused with a message, the downloader only ever fetches H.264).
 - The video wallpaper needs the app running – after a reboot, launch it again (or use autostart).
-- YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it).
+- YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it) and, for videos with separate picture/sound tracks, `ffmpeg` (`winget install ffmpeg`).
+- No Python needed if you use the ready-made `WallMotion.exe` from [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
 
 ---
 
@@ -74,7 +77,8 @@ Lehká náhrada Wallpaper Engine pro **Windows 10/11**:
 
 - **Tapeta z obrázku** – automaticky upravená přesně na rozlišení obrazovky
 - **Tapeta z videa** – smyčkově hraje za ikonami plochy, kliky propadají skrz
-- **YouTube podpora** – vlož odkaz, video se stáhne na pozadí a samo nastaví jako tapeta (H264/VP9 do 1080p, soubory do 500 MB)
+- **YouTube podpora** – vlož odkaz, video se stáhne na pozadí a samo nastaví jako tapeta (jen H.264, do 1080p, soubory do 500 MB, vždy se zvukovou stopou)
+- **Ovládání hlasitosti** – ztlumení i slider hlasitosti fungují okamžitě, i za běhu videa
 - **Tmavý / světlý motiv** a **čeština / angličtina**, pamatuje se pro příště
 - **Měření obrazovky** – zjistí rozlišení všech monitorů (fyzické pixely, HiDPI aware)
 
@@ -100,7 +104,8 @@ Přetáhni obrázek/video do okna (nebo klikni pro výběr) a stiskni **Nastavit
 
 - **Zastavit / obnovit původní** – vypne video a vrátí předchozí tapetu.
 - **Změřit obrazovku znovu** – znovu změří rozlišení (třeba po připojení monitoru).
-- **YouTube políčko** – vlož odkaz, stiskni tlačítko, stahování běží ve vlákně na pozadí s průběhem ve stavovém řádku.
+- **YouTube políčko** – vlož odkaz, stiskni tlačítko, stahování běží ve vlákně na pozadí s průběhem ve stavovém řádku. Berou se jen pravé YouTube odkazy. Stažená videa najdeš ve složce `downloads/` vedle aplikace (nebo .exe).
+- **Zvuk** – odškrtni *Ztlumit zvuk videa* a nastav hlasitost sliderem; obojí funguje hned. Pozor: videa s odděleným obrazem a zvukem potřebují ke sloučení `ffmpeg` (`winget install ffmpeg`), jinak aplikace přesně tohle napíše.
 - Jazyk/motiv se přepíná roletkami nahoře; vše (včetně posledního souboru a ztlumení) se ukládá do `%USERPROFILE%\.live_wallpaper_config.json`.
 - Debug log (kdyby něco zlobilo): `%TEMP%\live_wallpaper_debug.log`.
 
@@ -128,6 +133,7 @@ Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 ### Známá omezení
 
 - Primárně jeden (primární) monitor; roztažení přes víc monitorů jde doplnit.
-- Formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 bez problémů; AV1 soubory se odmítnou s hláškou).
+- Formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 bez problémů; soubory AV1/VP9 se odmítnou s hláškou, stahovač tahá jen H.264).
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
-- Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`).
+- Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`) a u videí s odděleným obrazem/zvukem i `ffmpeg` (`winget install ffmpeg`).
+- Bez Pythonu se obejdeš s hotovým `WallMotion.exe` ze záložky [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).

@@ -26,6 +26,7 @@ import os
 import ctypes
 import ipaddress
 import json
+import shutil
 import tempfile
 import time
 import urllib.parse
@@ -351,6 +352,7 @@ STRINGS = {
         "yt_done": "Video staženo, nastavuji jako tapetu…",
         "yt_error": "Stažení selhalo: {e}",
         "yt_invalid_url": "Neplatný nebo nepodporovaný YouTube odkaz.",
+        "yt_need_ffmpeg": "Toto video má obraz a zvuk odděleně – nainstaluj ffmpeg (do terminálu napiš: winget install ffmpeg), restartuj aplikaci a stáhni ho znovu.",
         "lang_label": "Jazyk:",
         "theme_label": "Motiv:",
         "theme_dark": "Tmavý",
@@ -391,6 +393,7 @@ STRINGS = {
         "yt_done": "Video downloaded, setting as wallpaper…",
         "yt_error": "Download failed: {e}",
         "yt_invalid_url": "Invalid or unsupported YouTube link.",
+        "yt_need_ffmpeg": "This video has separate video and audio tracks – install ffmpeg (run: winget install ffmpeg), restart the app and download it again.",
         "lang_label": "Language:",
         "theme_label": "Theme:",
         "theme_dark": "Dark",
@@ -1306,6 +1309,52 @@ def resolve_downloaded_path(info: dict, ydl) -> str:
         return ""
 
 
+def _ffmpeg_exe() -> str | None:
+    """Cesta k ffmpeg (slouceni oddelenych stop), nebo None.
+
+    Hleda systemovy ffmpeg v PATH a jako zalohu volitelny balik
+    imageio-ffmpeg (pip install imageio-ffmpeg).
+    """
+    try:
+        found = shutil.which("ffmpeg")
+        if found:
+            return found
+    except Exception:
+        pass
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            return exe
+    except Exception:
+        pass
+    return None
+
+
+def _ffmpeg_available() -> bool:
+    """Zjisti, zda je k dispozici ffmpeg (potreba pro slouceni bv+ba)."""
+    return _ffmpeg_exe() is not None
+
+
+# F10 + zvuk: jen H.264/AVC (avc1), max 1080p, vzdy se zvukovou stopou.
+# MERGED (vyzaduje ffmpeg.exe): 1080p sloucene ze zvlastnich stop, AAC prvni.
+_YT_FORMAT_MERGED = (
+    "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[acodec^=mp4a]/"
+    "bv*[vcodec^=avc1][height<=1080]+ba[acodec^=mp4a]/"
+    "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[acodec!=none]/"
+    "b[vcodec^=avc1][acodec^=mp4a][height<=1080][ext=mp4]/"
+    "bv*[vcodec^=avc1][height<=1080]+ba[acodec!=none]/"
+    "b[vcodec^=avc1][acodec!=none][height<=1080]"
+)
+# SINGLE (bez ffmpeg.exe): jen jeden soubor se zvukem, bez slucovani.
+_YT_FORMAT_SINGLE = (
+    "b[vcodec^=avc1][acodec^=mp4a][height<=1080][ext=mp4]/"
+    "b[vcodec^=avc1][acodec!=none][height<=1080][ext=mp4]/"
+    "b[vcodec^=avc1][acodec^=mp4a][height<=1080]/"
+    "b[vcodec^=avc1][acodec!=none][height<=1080]"
+)
+
+
 class DownloadWorker(QThread):
     progress = Signal(str)
     finished = Signal(str)
@@ -1344,11 +1393,18 @@ class DownloadWorker(QThread):
                 # nedostane ani snimek). Kdyz neni AVC k dispozici,
                 # stahovani schvalne selze, misto aby stahlo neprehratelne
                 # video.
+                # Zvuk: kazda vetev vyzaduje audio stopu (sloucene
+                # bv+ba, nebo jeden soubor s acodec!=none), aby stazene
+                # video melo zvuk - prehravani pak ridi checkbox Ztlumit.
+                # Audio se preferuje AAC (mp4a), ktere Qt na Windows
+                # prehraje spolehlive; opus az jako zalozni.
+                # Bez ffmpeg.exe nelze slucovat oddelene stopy (yt-dlp
+                # by skoncilo chybou postprocessingu a nevratilo se
+                # k dalsi volbe), proto se bez nej stahuje jen jeden
+                # soubor se zvukem (progresivni, typicky max 720p).
                 "format": (
-                    "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba/"
-                    "b[vcodec^=avc1][height<=1080][ext=mp4]/"
-                    "bv*[vcodec^=avc1][height<=1080]+ba/"
-                    "b[vcodec^=avc1][height<=1080]"
+                    _YT_FORMAT_MERGED if _ffmpeg_available()
+                    else _YT_FORMAT_SINGLE
                 ),
                 "outtmpl": os.path.join(YT_DIR, "%(id)s.%(ext)s"),
                 "merge_output_format": "mp4",
@@ -1359,6 +1415,12 @@ class DownloadWorker(QThread):
                 "max_filesize": 500 * 1024 * 1024,  # pojistka proti GB videim
                 "progress_hooks": [hook],
             }
+            ffexe = _ffmpeg_exe()
+            if ffexe:
+                try:
+                    opts["ffmpeg_location"] = os.path.dirname(os.path.abspath(ffexe))
+                except Exception:
+                    pass
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(self.url, download=True)
                 path = resolve_downloaded_path(info, ydl)
@@ -1367,7 +1429,13 @@ class DownloadWorker(QThread):
             else:
                 self.error.emit("soubor se nenasel")
         except Exception as e:
-            self.error.emit(str(e)[:300])
+            # Nektera videa (jako tohle) nemaji zadny jeden soubor
+            # s obrazem i zvukem - zvuk jde jen sloucit pres ffmpeg.
+            # Bez nej misto krypticke hlasky posleme pokyn k instalaci.
+            if "Requested format is not available" in str(e) and not _ffmpeg_available():
+                self.error.emit("NEED_FFMPEG")
+            else:
+                self.error.emit(str(e)[:300])
 
 
 # --------------------------------------------------------------------------
@@ -1684,6 +1752,8 @@ class MainWindow(QMainWindow):
 
     def _on_yt_error(self, err: str):
         debug_log(f"YT CHYBA: {err}")
+        if err == "NEED_FFMPEG":
+            err = self.S()["yt_need_ffmpeg"]
         self.status_label.setText(self.S()["yt_error"].format(e=err))
 
     # -- obrazovka ---------------------------------------------------------

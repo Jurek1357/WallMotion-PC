@@ -36,7 +36,7 @@ Drop an image/video onto the window (or click to browse) and hit **Set as wallpa
 - **Stop / restore original** – stops the video and restores the previous wallpaper.
 - **Re-measure display** – re-detects resolution (e.g. after plugging in a monitor).
 - **YouTube field** – paste a link, hit the button, download runs on a background thread with progress in the status line. Only genuine YouTube links are accepted. Downloads are stored in the `downloads/` folder next to the app (or .exe).
-- **Sound** – uncheck *Mute video sound* and set the volume with the slider; both act instantly. Note: videos whose picture and sound are separate tracks need `ffmpeg` for merging (`winget install ffmpeg`), otherwise the app tells you exactly that.
+- **Sound** – uncheck *Mute video sound* and set the volume with the slider; both act instantly. Merging of picture and sound is handled by the built-in ffmpeg, nothing to install.
 - Language/theme dropdowns are at the top; everything (incl. last file and mute) is saved to `%USERPROFILE%\.live_wallpaper_config.json`.
 - Debug log (if anything misbehaves): `%TEMP%\live_wallpaper_debug.log`.
 
@@ -66,7 +66,7 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 - Primary-monitor focused; multi-monitor spanning is a possible extension.
 - Video formats depend on Qt Multimedia codecs (mp4/H.264 works out of the box; AV1/VP9 files are refused with a message, the downloader only ever fetches H.264).
 - The video wallpaper needs the app running – after a reboot, launch it again (or use autostart).
-- YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it) and, for videos with separate picture/sound tracks, `ffmpeg` (`winget install ffmpeg`).
+- YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it, ffmpeg rides along via `imageio-ffmpeg`).
 - No Python needed if you use the ready-made `WallMotion.exe` from [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
 
 ---
@@ -105,7 +105,7 @@ Přetáhni obrázek/video do okna (nebo klikni pro výběr) a stiskni **Nastavit
 - **Zastavit / obnovit původní** – vypne video a vrátí předchozí tapetu.
 - **Změřit obrazovku znovu** – znovu změří rozlišení (třeba po připojení monitoru).
 - **YouTube políčko** – vlož odkaz, stiskni tlačítko, stahování běží ve vlákně na pozadí s průběhem ve stavovém řádku. Berou se jen pravé YouTube odkazy. Stažená videa najdeš ve složce `downloads/` vedle aplikace (nebo .exe).
-- **Zvuk** – odškrtni *Ztlumit zvuk videa* a nastav hlasitost sliderem; obojí funguje hned. Pozor: videa s odděleným obrazem a zvukem potřebují ke sloučení `ffmpeg` (`winget install ffmpeg`), jinak aplikace přesně tohle napíše.
+- **Zvuk** – odškrtni *Ztlumit zvuk videa* a nastav hlasitost sliderem; obojí funguje hned. Sloučení obrazu a zvuku řeší přibalený ffmpeg, nic se neinstaluje.
 - Jazyk/motiv se přepíná roletkami nahoře; vše (včetně posledního souboru a ztlumení) se ukládá do `%USERPROFILE%\.live_wallpaper_config.json`.
 - Debug log (kdyby něco zlobilo): `%TEMP%\live_wallpaper_debug.log`.
 
@@ -135,5 +135,5 @@ Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 - Primárně jeden (primární) monitor; roztažení přes víc monitorů jde doplnit.
 - Formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 bez problémů; soubory AV1/VP9 se odmítnou s hláškou, stahovač tahá jen H.264).
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
-- Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`) a u videí s odděleným obrazem/zvukem i `ffmpeg` (`winget install ffmpeg`).
+- Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`, ffmpeg se přibalí přes `imageio-ffmpeg`).
 - Bez Pythonu se obejdeš s hotovým `WallMotion.exe` ze záložky [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).

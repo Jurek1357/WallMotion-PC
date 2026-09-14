@@ -28,7 +28,7 @@ import json
 import tempfile
 import time
 
-from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory, QThread
+from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory, QThread, QTimer
 from PySide6.QtGui import QIcon, QAction, QPixmap, QImage, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -131,6 +131,59 @@ try:
     _USER32.GetWindowLongW.restype = ctypes.c_long
 except Exception:
     pass
+
+
+_CANVAS_CLASS = "WallMotionCanvas"
+_CS_OWNDC = 0x0020
+
+
+class _WndClassEx(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint),
+        ("style", ctypes.c_uint),
+        ("lpfnWndProc", ctypes.c_void_p),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", ctypes.c_void_p),
+        ("hIcon", ctypes.c_void_p),
+        ("hCursor", ctypes.c_void_p),
+        ("hbrBackground", ctypes.c_void_p),
+        ("lpszMenuName", ctypes.c_wchar_p),
+        ("lpszClassName", ctypes.c_wchar_p),
+        ("hIconSm", ctypes.c_void_p),
+    ]
+
+
+def _ensure_canvas_class() -> bool:
+    """Zaregistruje vlastni tridu platna: vlastni DC (OWNDC) a ZADNE mazani
+    pozadi (NULL brush). Klasicke STATIC by pri kazdem prekresleni blikalo
+    bile; nase platno malujeme kompletne sami kazdy snimek pres GDI."""
+    try:
+        if _USER32.GetClassInfoW(None, _CANVAS_CLASS, None):
+            return True
+    except Exception:
+        pass
+    try:
+        _USER32.DefWindowProcW.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
+        ]
+        _USER32.DefWindowProcW.restype = ctypes.c_void_p
+        _USER32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+        _USER32.GetModuleHandleW.restype = ctypes.c_void_p
+        wc = _WndClassEx()
+        wc.cbSize = ctypes.sizeof(_WndClassEx)
+        wc.style = _CS_OWNDC
+        wc.lpfnWndProc = _USER32.DefWindowProcW
+        wc.hInstance = _USER32.GetModuleHandleW(None)
+        wc.hbrBackground = None  # nemazat pozadi = zadne bile blikani
+        wc.lpszClassName = _CANVAS_CLASS
+        _USER32.RegisterClassExW.argtypes = [ctypes.POINTER(_WndClassEx)]
+        _USER32.RegisterClassExW.restype = ctypes.c_uint16
+        atom = _USER32.RegisterClassExW(ctypes.byref(wc))
+        return bool(atom)
+    except Exception as e:
+        debug_log(f"CANVAS CLASS: registrace selhala: {e!r}")
+        return False
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".live_wallpaper_config.json")
 
@@ -302,6 +355,8 @@ STRINGS = {
         "quit_tray": "Ukončit",
         "vid_fail_t": "Video tapeta",
         "vid_fail_m": "Nepodařilo se vložit video na plochu (WorkerW nenalezeno).\nDetail v souboru {log}",
+        "vid_decode_t": "Video se nepodařilo přehrát",
+        "vid_decode_m": "Z videa nepřišel ani jeden snímek (pravděpodobně nepodporovaný kodek, např. AV1/VP9 bez zvuku ve vysokém rozlišení). Zkus jiné video, ideálně H264 mp4 do 1080p.",
         "app_name": "Live Wallpaper",
     },
     "en": {
@@ -339,6 +394,8 @@ STRINGS = {
         "quit_tray": "Quit",
         "vid_fail_t": "Video wallpaper",
         "vid_fail_m": "Could not embed the video into the desktop (WorkerW not found).\nSee {log}",
+        "vid_decode_t": "Could not play the video",
+        "vid_decode_m": "No frames arrived from the video (likely an unsupported codec, e.g. AV1/VP9-only high-resolution file). Try a different video, ideally H264 mp4 up to 1080p.",
         "app_name": "Live Wallpaper",
     },
 }
@@ -605,6 +662,8 @@ class VideoWallpaperWindow(QWidget):
     GDI (StretchDIBits) na HDC naseho okna - to funguje bez ohledu na Qt.
     """
 
+    failed = Signal(str)
+
     def __init__(self, video_path: str, muted: bool = True):
         super().__init__()
         # Bez ramecku, bez focusu, bez aktivace - nesmi krast kliky/focus.
@@ -721,8 +780,10 @@ class VideoWallpaperWindow(QWidget):
             x, y = 0, 0
             exstyle = _WS_EX_NOACTIVATE | _WS_EX_TRANSPARENT | _WS_EX_TOOLWINDOW
         try:
+            cls_ok = _ensure_canvas_class()
+            canvas_cls = _CANVAS_CLASS if cls_ok else "STATIC"
             canvas = _USER32.CreateWindowExW(
-                exstyle, "STATIC", None,
+                exstyle, canvas_cls, None,
                 _WS_CHILD | _WS_VISIBLE | _WS_CLIPCHILDREN,
                 x, y, w, h,
                 parent, None, None, None,
@@ -788,7 +849,31 @@ class VideoWallpaperWindow(QWidget):
         self.player.setSource(QUrl.fromLocalFile(self.video_path))
         self.player.play()
         debug_log("START: play() zavolano -> OK")
+        # Watchdog: kdyz do 8 s neprijde ani snimek (nedejboze nepodporovany
+        # kodek typu AV1 - prehravac se zasekne v bufferingu bez chyby),
+        # platno zase zrusime, at nezustane svitit naprazdno.
+        try:
+            QTimer.singleShot(8000, self._check_progress)
+        except Exception:
+            pass
         return True
+
+    def _check_progress(self):
+        try:
+            if self._canvas == 0:
+                return  # uz zastaveno, vse OK
+            if self._frames > 0:
+                return  # hraje, vse OK
+            pos = 0
+            try:
+                pos = self.player.position()
+            except Exception:
+                pass
+            debug_log(f"WATCHDOG: zadny snimek za 8 s (pos={pos}) -> rusim platno")
+            self.failed.emit("decode")
+            self.stop()
+        except Exception as e:
+            debug_log(f"WATCHDOG vyjimka: {e!r}")
 
     def _make_bmi(self, sw: int, sh: int) -> _BitmapInfo:
         bmi = _BitmapInfo()
@@ -1163,9 +1248,17 @@ class DownloadWorker(QThread):
 
             opts = {
                 # Bez ffmpeg nelze mergovat oddelene stopy, proto bereme
-                # nejlepsi JEDEN soubor: nejradsi progressive (se zvukem)
-                # do 1080p, jinak nejlepsi video do 1080p.
-                "format": "b[acodec!=none][height<=1080]/bv*[height<=1080]/b[height<=1080]/b",
+                # nejlepsi JEDEN soubor. VYHNOUT SE AV1: Qt/FFmpeg v teto
+                # appce z AV1 nedostane ani snimek (zasekly buffering bez
+                # chyby). vcodec-filtry yt-dlp jsou nespolehlive, proto
+                # sahame po konvencnich YouTube ID (AVC/VP9, sestupne):
+                # 137/22/136/720p, 135/18/480-360p, VP9 1080-240p, zbytek.
+                # Hraje vzdy (testovano), zvuk chybi jen u nekterych
+                # variant - tapeta je stejne defaultne ztlumena.
+                "format": (
+                    "137/22/136/135/18/248/247/244/134/243/133/242/160/278/"
+                    "b[height<=1080]/b"
+                ),
                 "outtmpl": os.path.join(YT_DIR, "%(id)s.%(ext)s"),
                 "merge_output_format": "mp4",
                 "quiet": True,
@@ -1546,6 +1639,7 @@ class MainWindow(QMainWindow):
             self.video_window = VideoWallpaperWindow(
                 self.selected_path, muted=self.mute_checkbox.isChecked()
             )
+            self.video_window.failed.connect(self._on_video_failed)
             if self.video_window.start():
                 self.status_label.setText(s["vid_running"].format(w=pw, h=ph))
                 self.tray.showMessage(
@@ -1565,6 +1659,21 @@ class MainWindow(QMainWindow):
             return
 
         self._save_config()
+
+    def _on_video_failed(self, reason: str):
+        s = self.S()
+        debug_log(f"VIDEO FAILED: {reason}")
+        if self.video_window is not None:
+            try:
+                self.video_window.failed.disconnect(self._on_video_failed)
+            except Exception:
+                pass
+            self.video_window = None
+        if reason == "decode":
+            self.status_label.setText(s["vid_decode_m"])
+            QMessageBox.warning(self, s["vid_decode_t"], s["vid_decode_m"])
+        else:
+            self.status_label.setText(s["vid_fail_m"].format(log=DEBUG_LOG))
 
     def stop_wallpaper(self):
         if self.video_window is not None:

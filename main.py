@@ -926,20 +926,33 @@ class VideoWallpaperWindow(QWidget):
 
     def _blit_stretch(self, img: QImage, sw: int, sh: int) -> int:
         """Cover pres GDI StretchDIBits (rychly COLORONCOLOR rezim).
-        Zero-copy: predava se primo pointer na buffer QImage, bez kopie
-        celeho snimku (1080p RGB32 = ~8 MB na snimek). img zije po celou
-        dobu synchronniho volani, takze je to bezpecne. BITMAPINFO je
-        kesovane podle rozmeru videa."""
+        Zero-copy: predava se primo pointer na buffer QImage pres writable
+        memoryview (bits -> from_buffer -> cast), bez kopie celeho snimku
+        (1080p RGB32 = ~8 MB na snimek). img i view ziji po celou dobu
+        synchronniho volani, takze je to bezpecne. Pri neuspechu zalozni
+        kopie pres bytes(). BITMAPINFO je kesovane podle rozmeru videa."""
         scale = max(self._dw / sw, self._dh / sh)
         dw, dh = int(sw * scale), int(sh * scale)
         dx, dy = int((self._dw - dw) / 2), int((self._dh - dh) / 2)
+        buf = None
+        _keepalive = None
         try:
-            ptr = int(img.constBits())
+            n = img.sizeInBytes()
+            if n > 0:
+                mv = img.bits()  # writable memoryview, zadna kopie
+                _keepalive = (ctypes.c_char * n).from_buffer(mv)
+                buf = ctypes.cast(_keepalive, ctypes.c_void_p)
         except Exception:
-            return 0
-        if not ptr:
-            return 0
-        buf = ctypes.c_void_p(ptr)
+            buf = None
+        if buf is None:
+            try:
+                raw = bytes(img.constBits())  # zaloha s kopii
+                if not raw:
+                    return 0
+                _keepalive = raw
+                buf = ctypes.c_char_p(raw)
+            except Exception:
+                return 0
         if self._bmi is None:
             self._bmi = self._make_bmi(sw, sh)
         return _GDI32.StretchDIBits(

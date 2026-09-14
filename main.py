@@ -36,7 +36,7 @@ from PySide6.QtGui import QIcon, QAction, QPixmap, QImage, QDragEnterEvent, QDro
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QSystemTrayIcon, QMenu,
-    QMessageBox, QCheckBox, QFrame, QComboBox, QLineEdit
+    QMessageBox, QCheckBox, QFrame, QComboBox, QLineEdit, QSlider
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
 
@@ -341,6 +341,7 @@ STRINGS = {
         "screen_multi": "🖥 Obrazovky ({n}): {parts} | primární {w} × {h}",
         "drop_hint": "Přetáhni sem obrázek nebo video\nnebo klikni pro výběr",
         "mute": "Ztlumit zvuk videa",
+        "volume_label": "Hlasitost:",
         "apply": "Nastavit jako tapetu",
         "measure": "Změřit obrazovku znovu",
         "stop": "Zastavit / obnovit původní",
@@ -382,6 +383,7 @@ STRINGS = {
         "screen_multi": "🖥 Displays ({n}): {parts} | primary {w} × {h}",
         "drop_hint": "Drag & drop an image or video here\nor click to browse",
         "mute": "Mute video sound",
+        "volume_label": "Volume:",
         "apply": "Set as wallpaper",
         "measure": "Re-measure display",
         "stop": "Stop / restore original",
@@ -682,7 +684,7 @@ class VideoWallpaperWindow(QWidget):
 
     failed = Signal(str)
 
-    def __init__(self, video_path: str, muted: bool = True):
+    def __init__(self, video_path: str, muted: bool = True, volume: float = 0.3):
         super().__init__()
         # Bez ramecku, bez focusu, bez aktivace - nesmi krast kliky/focus.
         # Zadny layout ani potomek: cele okno je platno, maluje se pres GDI.
@@ -697,10 +699,11 @@ class VideoWallpaperWindow(QWidget):
 
         self.video_path = video_path
         self._muted = bool(muted)
+        self._volume = max(0.0, min(1.0, float(volume)))
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
-        self.audio_output.setVolume(0.0 if self._muted else 1.0)
+        self.audio_output.setVolume(0.0 if self._muted else self._volume)
         self.player.setAudioOutput(self.audio_output)
         self.sink = QVideoSink(self)
         self.player.setVideoOutput(self.sink)
@@ -748,7 +751,16 @@ class VideoWallpaperWindow(QWidget):
         """F4: okamzite prepne zvuk, i kdyz video prave hraje."""
         self._muted = bool(muted)
         try:
-            self.audio_output.setVolume(0.0 if self._muted else 1.0)
+            self.audio_output.setVolume(0.0 if self._muted else self._volume)
+        except Exception:
+            pass
+
+    def set_volume(self, volume: float) -> None:
+        """Okamzite nastavi hlasitost (0.0-1.0), i kdyz video prave hraje."""
+        self._volume = max(0.0, min(1.0, float(volume)))
+        try:
+            if not self._muted:
+                self.audio_output.setVolume(self._volume)
         except Exception:
             pass
 
@@ -1220,7 +1232,21 @@ class DropZone(QFrame):
 # --------------------------------------------------------------------------
 # Stahovani videa z YouTube (yt-dlp) na pozadi, at nezamrzne UI
 # --------------------------------------------------------------------------
-YT_DIR = os.path.join(tempfile.gettempdir(), "wallmotion_yt")
+def _app_base_dir() -> str:
+    """Adresar se spustitelnym souborem (u EXE) nebo se zdrojakem.
+
+    U zmrazeneho EXE (onefile) se nesmi pouzit _MEIPASS (docasny rozbalovaci
+    adresar) - videa patri vedle EXE. Ze zdrojaku vedle main.py.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+    except Exception:
+        pass
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+YT_DIR = os.path.join(_app_base_dir(), "downloads")
 
 # F1: pouzivat smi jen http(s) odkazy na zname YouTube domeny.
 MAX_YT_URL_LENGTH = 2048
@@ -1513,6 +1539,18 @@ class MainWindow(QMainWindow):
         self.mute_checkbox.toggled.connect(self._on_mute_toggled)
         layout.addWidget(self.mute_checkbox)
 
+        # -- hlasitost videa ---------------------------------------------
+        vol_row = QHBoxLayout()
+        vol_row.setSpacing(8)
+        self.volume_label = QLabel()
+        vol_row.addWidget(self.volume_label)
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(30)
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        vol_row.addWidget(self.volume_slider, 1)
+        layout.addLayout(vol_row)
+
         self.apply_btn = QPushButton()
         self.apply_btn.clicked.connect(self.apply_wallpaper)
         layout.addWidget(self.apply_btn)
@@ -1615,6 +1653,12 @@ class MainWindow(QMainWindow):
                     self.mute_checkbox.setChecked(bool(cfg.get("muted", True)))
                 except Exception:
                     pass
+                try:
+                    self.volume_slider.blockSignals(True)
+                    self.volume_slider.setValue(int(cfg.get("volume", 30)))
+                    self.volume_slider.blockSignals(False)
+                except Exception:
+                    pass
                 path = cfg.get("last_path")
                 if path and os.path.exists(path):
                     self.selected_path = path
@@ -1640,6 +1684,7 @@ class MainWindow(QMainWindow):
                     "lang": self.lang,
                     "theme": self.theme,
                     "muted": self.mute_checkbox.isChecked(),
+                    "volume": self.volume_slider.value(),
                 }, f)
         except Exception:
             pass
@@ -1650,6 +1695,15 @@ class MainWindow(QMainWindow):
         try:
             if self.video_window is not None:
                 self.video_window.set_muted(bool(checked))
+        except Exception:
+            pass
+
+    def _on_volume_changed(self, value: int):
+        """Ulozit hlasitost a okamzite ji nastavit bezici tapete."""
+        self._save_config()
+        try:
+            if self.video_window is not None:
+                self.video_window.set_volume(float(value) / 100.0)
         except Exception:
             pass
 
@@ -1699,6 +1753,7 @@ class MainWindow(QMainWindow):
             pass
         self.drop_zone.set_hint(s["drop_hint"])
         self.mute_checkbox.setText(s["mute"])
+        self.volume_label.setText(s["volume_label"])
         self.apply_btn.setText(s["apply"])
         self.measure_btn.setText(s["measure"])
         self.stop_btn.setText(s["stop"])
@@ -1822,7 +1877,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText(s["img_set"].format(w=pw, h=ph))
         elif ext in VIDEO_EXTS:
             self.video_window = VideoWallpaperWindow(
-                self.selected_path, muted=self.mute_checkbox.isChecked()
+                self.selected_path, muted=self.mute_checkbox.isChecked(),
+                volume=self.volume_slider.value() / 100.0,
             )
             self.video_window.failed.connect(self._on_video_failed)
             if self.video_window.start():

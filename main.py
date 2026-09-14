@@ -353,6 +353,7 @@ STRINGS = {
         "yt_done": "Video staženo, nastavuji jako tapetu…",
         "yt_error": "Stažení selhalo: {e}",
         "yt_invalid_url": "Neplatný nebo nepodporovaný YouTube odkaz.",
+        "open_folder": "Otevřít složku videí",
         "yt_need_ffmpeg": "Toto video má obraz a zvuk odděleně – nainstaluj ffmpeg (do terminálu napiš: winget install ffmpeg), restartuj aplikaci a stáhni ho znovu.",
         "lang_label": "Jazyk:",
         "theme_label": "Motiv:",
@@ -395,6 +396,7 @@ STRINGS = {
         "yt_done": "Video downloaded, setting as wallpaper…",
         "yt_error": "Download failed: {e}",
         "yt_invalid_url": "Invalid or unsupported YouTube link.",
+        "open_folder": "Open videos folder",
         "yt_need_ffmpeg": "This video has separate video and audio tracks – install ffmpeg (run: winget install ffmpeg), restart the app and download it again.",
         "lang_label": "Language:",
         "theme_label": "Theme:",
@@ -1551,6 +1553,12 @@ class MainWindow(QMainWindow):
         yt_row.addWidget(self.yt_button)
         layout.addLayout(yt_row)
 
+        # -- slozka se stazenymi videi -----------------------------------
+        self.folder_button = QPushButton()
+        self.folder_button.setObjectName("secondary")
+        self.folder_button.clicked.connect(self.open_downloads_folder)
+        layout.addWidget(self.folder_button)
+
         self.mute_checkbox = QCheckBox()
         self.mute_checkbox.setChecked(True)
         self.mute_checkbox.toggled.connect(self._on_mute_toggled)
@@ -1776,6 +1784,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setText(s["stop"])
         self.yt_input.setPlaceholderText(s["yt_placeholder"])
         self.yt_button.setText(s["yt_button"])
+        self.folder_button.setText(s["open_folder"])
         if not self.status_label.text():
             self.status_label.setText(s["ready"])
         try:
@@ -1827,6 +1836,21 @@ class MainWindow(QMainWindow):
         if err == "NEED_FFMPEG":
             err = self.S()["yt_need_ffmpeg"]
         self.status_label.setText(self.S()["yt_error"].format(e=err))
+
+    def open_downloads_folder(self):
+        """Otevre slozku se stazenymi videi v Pruzkumniku."""
+        try:
+            os.makedirs(YT_DIR, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            os.startfile(YT_DIR)  # Windows
+        except Exception:
+            try:
+                from PySide6.QtCore import QDesktopServices
+                QDesktopServices.openUrl(QUrl.fromLocalFile(YT_DIR))
+            except Exception:
+                pass
 
     # -- obrazovka ---------------------------------------------------------
     def _refresh_screen_label(self):

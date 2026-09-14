@@ -24,9 +24,11 @@ Spusteni:
 import sys
 import os
 import ctypes
+import ipaddress
 import json
 import tempfile
 import time
+import urllib.parse
 
 from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory, QThread, QTimer
 from PySide6.QtGui import QIcon, QAction, QPixmap, QImage, QDragEnterEvent, QDropEvent
@@ -348,6 +350,7 @@ STRINGS = {
         "yt_downloading": "Stahuji z YouTube… {p}",
         "yt_done": "Video staženo, nastavuji jako tapetu…",
         "yt_error": "Stažení selhalo: {e}",
+        "yt_invalid_url": "Neplatný nebo nepodporovaný YouTube odkaz.",
         "lang_label": "Jazyk:",
         "theme_label": "Motiv:",
         "theme_dark": "Tmavý",
@@ -387,6 +390,7 @@ STRINGS = {
         "yt_downloading": "Downloading from YouTube… {p}",
         "yt_done": "Video downloaded, setting as wallpaper…",
         "yt_error": "Download failed: {e}",
+        "yt_invalid_url": "Invalid or unsupported YouTube link.",
         "lang_label": "Language:",
         "theme_label": "Theme:",
         "theme_dark": "Dark",
@@ -689,10 +693,11 @@ class VideoWallpaperWindow(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         self.video_path = video_path
+        self._muted = bool(muted)
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
-        self.audio_output.setVolume(0.0 if muted else 1.0)
+        self.audio_output.setVolume(0.0 if self._muted else 1.0)
         self.player.setAudioOutput(self.audio_output)
         self.sink = QVideoSink(self)
         self.player.setVideoOutput(self.sink)
@@ -735,6 +740,14 @@ class VideoWallpaperWindow(QWidget):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.player.setPosition(0)
             self.player.play()
+
+    def set_muted(self, muted: bool) -> None:
+        """F4: okamzite prepne zvuk, i kdyz video prave hraje."""
+        self._muted = bool(muted)
+        try:
+            self.audio_output.setVolume(0.0 if self._muted else 1.0)
+        except Exception:
+            pass
 
     def _on_player_error(self, error, error_string):
         debug_log(f"PLAYER ERROR: {error} | {error_string}")
@@ -1206,6 +1219,68 @@ class DropZone(QFrame):
 # --------------------------------------------------------------------------
 YT_DIR = os.path.join(tempfile.gettempdir(), "wallmotion_yt")
 
+# F1: pouzivat smi jen http(s) odkazy na zname YouTube domeny.
+MAX_YT_URL_LENGTH = 2048
+
+
+def is_valid_youtube_url(url: str) -> bool:
+    """Overi, ze URL je bezpecny YouTube odkaz, nez se preda yt-dlp.
+
+    Povolene jsou jen legitimni YouTube domeny (youtube.com + subdomeny,
+    youtu.be, youtube-nocookie.com). Odmita se: prazdne/nepodporovane URL,
+    jine schema nez http/https (napr. file://), localhost, hole IP adresy
+    a prilis dlouhe URL.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    url = url.strip()
+    if not url or len(url) > MAX_YT_URL_LENGTH:
+        return False
+    if any(ch.isspace() for ch in url):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host == "localhost":
+        return False
+    try:
+        # Odmitnout raw IPv4/IPv6 adresy (vcetne 127.0.0.1 apod.).
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    is_youtube = host == "youtube.com" or host.endswith(".youtube.com")
+    is_short = host == "youtu.be" or host.endswith(".youtu.be")
+    is_nocookie = (
+        host == "youtube-nocookie.com"
+        or host.endswith(".youtube-nocookie.com")
+    )
+    if not (is_youtube or is_short or is_nocookie):
+        return False
+    path = parsed.path or ""
+    query = parsed.query or ""
+    if is_short:
+        # youtu.be/<id> - musi obsahovat ID videa
+        return len(path.strip("/")) > 0
+    if is_nocookie:
+        # youtube-nocookie.com se pouziva jen jako /embed/<id>
+        return path.startswith("/embed/") and len(path) > len("/embed/")
+    # youtube.com: jen stranky videi (watch/shorts/embed/live/v)
+    if path.startswith(("/watch", "/shorts/", "/embed/", "/live/", "/v/")):
+        return True
+    if path.startswith("/playlist") and "list=" in query:
+        return True
+    # /watch muze prijit i s jinou cestou, rozhoduje parametr v=
+    if "v=" in query:
+        return True
+    return False
+
 
 def resolve_downloaded_path(info: dict, ydl) -> str:
     """Najde skutecny soubor stazeneho videa (po pripadnem mergu)."""
@@ -1241,6 +1316,11 @@ class DownloadWorker(QThread):
         self.url = url.strip()
 
     def run(self):
+        # F1 (obrana do hloubky): URL znovu overit i ve vlakne, nez se
+        # preda yt-dlp.
+        if not is_valid_youtube_url(self.url):
+            self.error.emit("neplatný YouTube odkaz")
+            return
         try:
             import yt_dlp
         except ImportError:
@@ -1258,17 +1338,17 @@ class DownloadWorker(QThread):
                     pass
 
             opts = {
-                # Bez ffmpeg nelze mergovat oddelene stopy, proto bereme
-                # nejlepsi JEDEN soubor. VYHNOUT SE AV1: Qt/FFmpeg v teto
-                # appce z AV1 nedostane ani snimek (zasekly buffering bez
-                # chyby). vcodec-filtry yt-dlp jsou nespolehlive, proto
-                # sahame po konvencnich YouTube ID (AVC/VP9, sestupne):
-                # 137/22/136/720p, 135/18/480-360p, VP9 1080-240p, zbytek.
-                # Hraje vzdy (testovano), zvuk chybi jen u nekterych
-                # variant - tapeta je stejne defaultne ztlumena.
+                # F10: vyzadovat H.264/AVC (avc1) a max. 1080p. Vsechny
+                # volby maji filtr vcodec^=avc1 + height<=1080, takze se
+                # nikdy nestahne AV1 ani VP9 (Qt/FFmpeg backend z nich
+                # nedostane ani snimek). Kdyz neni AVC k dispozici,
+                # stahovani schvalne selze, misto aby stahlo neprehratelne
+                # video.
                 "format": (
-                    "137/22/136/135/18/248/247/244/134/243/133/242/160/278/"
-                    "b[height<=1080]/b"
+                    "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba/"
+                    "b[vcodec^=avc1][height<=1080][ext=mp4]/"
+                    "bv*[vcodec^=avc1][height<=1080]+ba/"
+                    "b[vcodec^=avc1][height<=1080]"
                 ),
                 "outtmpl": os.path.join(YT_DIR, "%(id)s.%(ext)s"),
                 "merge_output_format": "mp4",
@@ -1362,7 +1442,7 @@ class MainWindow(QMainWindow):
 
         self.mute_checkbox = QCheckBox()
         self.mute_checkbox.setChecked(True)
-        self.mute_checkbox.toggled.connect(lambda _v: self._save_config())
+        self.mute_checkbox.toggled.connect(self._on_mute_toggled)
         layout.addWidget(self.mute_checkbox)
 
         self.apply_btn = QPushButton()
@@ -1496,6 +1576,15 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _on_mute_toggled(self, checked: bool):
+        """F4: ulozit volbu a okamzite prepnpout zvuk bezici tapety."""
+        self._save_config()
+        try:
+            if self.video_window is not None:
+                self.video_window.set_muted(bool(checked))
+        except Exception:
+            pass
+
     # -- motiv + jazyk ---------------------------------------------------------
     def apply_theme(self, theme: str, save: bool = True):
         if theme not in THEMES:
@@ -1562,6 +1651,12 @@ class MainWindow(QMainWindow):
         url = self.yt_input.text().strip()
         if not url:
             self.status_label.setText(s["warn_nofile_m"])
+            return
+        # F1: URL overit driv, nez se preda yt-dlp.
+        if not is_valid_youtube_url(url):
+            self.status_label.setText(
+                s["yt_error"].format(e=s["yt_invalid_url"])
+            )
             return
         if self.yt_worker is not None and self.yt_worker.isRunning():
             return

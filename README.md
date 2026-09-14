@@ -7,7 +7,11 @@
 A simple Wallpaper Engine alternative for **Windows 10/11**. It can:
 
 - set an **image** as the classic desktop wallpaper (auto-fitted to your screen resolution),
-- set a **video (mp4 and more)** as a live wallpaper that loops behind the desktop icons.
+- set a **video (mp4 and more)** as a live wallpaper that loops behind the desktop icons,
+- **download a video from a YouTube link** and set it as wallpaper in one click (yt-dlp, best single file up to 1080p, max 500 MB),
+- switch **UI language (Czech / English)** and **theme (dark / light)** – saved to config.
+
+No console needed: run the ready-made **`dist/WallMotion.exe`** (built with PyInstaller), or run from source below.
 
 ### How it works
 
@@ -34,6 +38,8 @@ python main.py
 A small window opens – drop an image/video (or click to browse) and hit **"Nastavit jako tapetu" (Set as wallpaper)**. For video the app must keep running (closing the window only hides it to the system tray, so the player keeps animating the wallpaper). Quit via the tray icon → "Ukončit" (Quit).
 
 The **"Zastavit / obnovit původní" (Stop / restore original)** button stops the video wallpaper and restores the wallpaper that was set before the app started. **"Změřit obrazovku znovu" (Re-measure screen)** re-detects the screen resolution (useful after plugging in a monitor).
+
+Paste a **YouTube link** into the field and hit the download button – the video downloads in the background (progress in the status line) to a temp folder and is then set as wallpaper automatically. Language and theme are switched with the dropdowns at the top (Czech is the default) and remembered next launch.
 
 ### 3. Optional: build a .exe
 
@@ -68,7 +74,11 @@ Place a shortcut to `LiveWallpaper.exe` (or `main.py`) in:
 Jednoduchá náhrada Wallpaper Engine pro **Windows 10/11**. Umí:
 
 - nastavit **obrázek** jako klasickou tapetu plochy (automaticky upravený na rozlišení obrazovky),
-- nastavit **video (mp4 a další)** jako živou tapetu, která se smyčkově přehrává za ikonami plochy.
+- nastavit **video (mp4 a další)** jako živou tapetu, která se smyčkově přehrává za ikonami plochy,
+- **stáhnout video z YouTube odkazu** a jedním klikem ho nastavit jako tapetu (yt-dlp, nejlepší jeden soubor do 1080p, max 500 MB),
+- přepínat **jazyk UI (čeština / angličtina)** a **motiv (tmavý / světlý)** – ukládá se do configu.
+
+Bez konzole: spusť hotové **`dist/WallMotion.exe`** (sbalené přes PyInstaller), nebo ze zdrojáků níže.
 
 ### Jak to funguje
 
@@ -95,6 +105,8 @@ python main.py
 Otevře se malé okno – přetáhni obrázek/video (nebo klikni pro výběr) a stiskni **„Nastavit jako tapetu“**. U videa musí aplikace běžet dál (zavření okna křížkem ji jen schová do systémové lišty, aby přehrávač dál animoval tapetu). Ukončíš ji přes ikonu v liště → „Ukončit“.
 
 Tlačítko **„Zastavit / obnovit původní“** video tapetu vypne a vrátí tapetu, která byla nastavená před spuštěním appky. Tlačítko **„Změřit obrazovku znovu“** znovu změří rozlišení (hodí se po připojení monitoru).
+
+**YouTube odkaz** vlož do políčka a stiskni tlačítko stahování – video se stáhne na pozadí (průběh ve stavovém řádku) do dočasné složky a pak se automaticky nastaví jako tapeta. Jazyk a motiv se přepínají roletkami nahoře (výchozí čeština) a pamatují se pro příští spuštění.
 
 ### 3. Volitelné: sbalení do .exe
 

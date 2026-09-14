@@ -26,13 +26,14 @@ import os
 import ctypes
 import json
 import tempfile
+import time
 
-from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory
+from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory, QThread
 from PySide6.QtGui import QIcon, QAction, QPixmap, QImage, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QSystemTrayIcon, QMenu,
-    QMessageBox, QCheckBox, QFrame
+    QMessageBox, QCheckBox, QFrame, QComboBox, QLineEdit
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
 
@@ -166,18 +167,37 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
 VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".webm"}
 
 ACCENT = "#7c5cff"
-BG = "#1b1c22"
-BG_CARD = "#25262e"
-BG_CARD_HOVER = "#2d2f3a"
-TEXT = "#eceef2"
-TEXT_DIM = "#9195a3"
 
-STYLESHEET = f"""
+THEMES = {
+    "dark": {
+        "bg": "#1b1c22",
+        "card": "#25262e",
+        "card_hover": "#2d2f3a",
+        "text": "#eceef2",
+        "dim": "#9195a3",
+        "border": "#3a3c47",
+        "input": "#202128",
+    },
+    "light": {
+        "bg": "#eef0f5",
+        "card": "#ffffff",
+        "card_hover": "#e2e6ee",
+        "text": "#1c1e24",
+        "dim": "#5d6472",
+        "border": "#cfd5e1",
+        "input": "#ffffff",
+    },
+}
+
+
+def build_stylesheet(theme: str) -> str:
+    t = THEMES.get(theme, THEMES["dark"])
+    return f"""
 QMainWindow {{
-    background-color: {BG};
+    background-color: {t['bg']};
 }}
 QWidget {{
-    color: {TEXT};
+    color: {t['text']};
     font-family: "Segoe UI", sans-serif;
 }}
 QLabel#title {{
@@ -185,11 +205,11 @@ QLabel#title {{
     font-weight: 600;
 }}
 QLabel#subtitle {{
-    color: {TEXT_DIM};
+    color: {t['dim']};
     font-size: 12px;
 }}
 QLabel#status {{
-    color: {TEXT_DIM};
+    color: {t['dim']};
     font-size: 12px;
 }}
 QPushButton {{
@@ -208,17 +228,129 @@ QPushButton:pressed {{
     background-color: #6a4de0;
 }}
 QPushButton#secondary {{
-    background-color: {BG_CARD};
-    color: {TEXT};
+    background-color: {t['card']};
+    color: {t['text']};
 }}
 QPushButton#secondary:hover {{
-    background-color: {BG_CARD_HOVER};
+    background-color: {t['card_hover']};
+}}
+QPushButton:disabled {{
+    background-color: {t['card_hover']};
+    color: {t['dim']};
 }}
 QCheckBox {{
-    color: {TEXT_DIM};
+    color: {t['dim']};
     font-size: 12px;
 }}
+QLineEdit {{
+    background-color: {t['input']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 12px;
+}}
+QComboBox {{
+    background-color: {t['card']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {t['card']};
+    color: {t['text']};
+    selection-background-color: {ACCENT};
+}}
 """
+
+
+STRINGS = {
+    "cs": {
+        "subtitle": "Nastav si obrázek nebo video jako pozadí plochy",
+        "screen_unknown": "🖥 Obrazovka: nezjištěna",
+        "screen_one": "🖥 Obrazovka: {w} × {h}",
+        "screen_multi": "🖥 Obrazovky ({n}): {parts} | primární {w} × {h}",
+        "drop_hint": "Přetáhni sem obrázek nebo video\nnebo klikni pro výběr",
+        "mute": "Ztlumit zvuk videa",
+        "apply": "Nastavit jako tapetu",
+        "measure": "Změřit obrazovku znovu",
+        "stop": "Zastavit / obnovit původní",
+        "ready": "Připraveno.",
+        "file_selected": "Soubor vybrán. Klikni na „Nastavit jako tapetu“.",
+        "yt_placeholder": "Vlož YouTube odkaz…",
+        "yt_button": "Stáhnout a nastavit",
+        "yt_downloading": "Stahuji z YouTube… {p}",
+        "yt_done": "Video staženo, nastavuji jako tapetu…",
+        "yt_error": "Stažení selhalo: {e}",
+        "lang_label": "Jazyk:",
+        "theme_label": "Motiv:",
+        "theme_dark": "Tmavý",
+        "theme_light": "Světlý",
+        "warn_unsupported_t": "Nepodporovaný formát",
+        "warn_unsupported_m": "Tento typ souboru není podporovaný.",
+        "warn_nofile_t": "Chybí soubor",
+        "warn_nofile_m": "Nejdřív vyber obrázek nebo video.",
+        "img_set": "Obrázek upraven na {w} × {h} a nastaven.",
+        "vid_running": "Video tapeta běží na pozadí ({w} × {h}).",
+        "vid_started_msg": "Video tapeta byla spuštěna.",
+        "restored": "Původní tapeta byla obnovena.",
+        "hidden_tray_msg": "Aplikace běží na pozadí v systémové liště.",
+        "measured": "Obrazovka změřena: {w} × {h}.",
+        "open_tray": "Otevřít",
+        "quit_tray": "Ukončit",
+        "vid_fail_t": "Video tapeta",
+        "vid_fail_m": "Nepodařilo se vložit video na plochu (WorkerW nenalezeno).\nDetail v souboru {log}",
+        "app_name": "Live Wallpaper",
+    },
+    "en": {
+        "subtitle": "Set an image or video as your desktop background",
+        "screen_unknown": "🖥 Display: not detected",
+        "screen_one": "🖥 Display: {w} × {h}",
+        "screen_multi": "🖥 Displays ({n}): {parts} | primary {w} × {h}",
+        "drop_hint": "Drag & drop an image or video here\nor click to browse",
+        "mute": "Mute video sound",
+        "apply": "Set as wallpaper",
+        "measure": "Re-measure display",
+        "stop": "Stop / restore original",
+        "ready": "Ready.",
+        "file_selected": "File selected. Click “Set as wallpaper”.",
+        "yt_placeholder": "Paste a YouTube link…",
+        "yt_button": "Download & set",
+        "yt_downloading": "Downloading from YouTube… {p}",
+        "yt_done": "Video downloaded, setting as wallpaper…",
+        "yt_error": "Download failed: {e}",
+        "lang_label": "Language:",
+        "theme_label": "Theme:",
+        "theme_dark": "Dark",
+        "theme_light": "Light",
+        "warn_unsupported_t": "Unsupported format",
+        "warn_unsupported_m": "This file type is not supported.",
+        "warn_nofile_t": "No file",
+        "warn_nofile_m": "Pick an image or video first.",
+        "img_set": "Image fitted to {w} × {h} and set.",
+        "vid_running": "Video wallpaper running ({w} × {h}).",
+        "vid_started_msg": "Video wallpaper started.",
+        "restored": "Original wallpaper restored.",
+        "hidden_tray_msg": "The app keeps running in the system tray.",
+        "measured": "Display measured: {w} × {h}.",
+        "open_tray": "Open",
+        "quit_tray": "Quit",
+        "vid_fail_t": "Video wallpaper",
+        "vid_fail_m": "Could not embed the video into the desktop (WorkerW not found).\nSee {log}",
+        "app_name": "Live Wallpaper",
+    },
+}
+
+LANGS = {"cs": "Čeština", "en": "English"}
+
+CURRENT_THEME = dict(THEMES["dark"])
+
+
+def T(key: str) -> str:
+    """Aktualni barva motivu (po apply_theme se prepne dark/light)."""
+    return CURRENT_THEME.get(key, THEMES["dark"].get(key, "#000000"))
 
 
 # --------------------------------------------------------------------------
@@ -518,6 +650,16 @@ class VideoWallpaperWindow(QWidget):
         # mod vykreslovani: "coloroncolor" (rychly) | "halftone" (hezci, 4x pomalejsi)
         self._blit_mode = "coloroncolor"
         self._bmi = None  # kesovane BITMAPINFO pro aktualni src rozmer
+        # Ochrana proti zahlceni: zpracuj nejvys ~40 snimku/s, zbytek zahod.
+        # Jinak se pri 60fps / pomalem blitu fronta snimku nafukuje do pameti
+        # a system muze zamrznout. Bezne 24-30fps video prochazi bez skipu.
+        self._proc_min_interval = 0.025
+        self._last_proc_t = 0.0
+        self._skipped = 0
+        # Nejvetsi snimek, jaky jeste malujeme 1:1. Vetsi (4K/8K z YouTube)
+        # nejdriv rychle zmensime, at GDI nezahltime desitkami MB na snimek.
+        self._max_src_pixels = 2560 * 1440
+        self._downscaled = False
 
     def _loop_video(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -692,6 +834,11 @@ class VideoWallpaperWindow(QWidget):
             debug_log("FRAME: map vratil False")
             return
         try:
+            now = time.perf_counter()
+            if self._frames > 0 and (now - self._last_proc_t) < self._proc_min_interval:
+                # nestihame: snimek zahodit (fronta se nesmi nafukovat)
+                self._skipped += 1
+                return
             img = frame.toImage()
             if img.isNull():
                 debug_log("FRAME: toImage null")
@@ -702,6 +849,20 @@ class VideoWallpaperWindow(QWidget):
             if sw <= 0 or sh <= 0 or self._dw <= 0 or self._dh <= 0:
                 debug_log(f"FRAME: spatny rozmer src={sw}x{sh} dst={self._dw}x{self._dh}")
                 return
+            if sw * sh > self._max_src_pixels:
+                # obri snimek (4K/8K): rychle zmensit, jinak OOM/zaseknuti
+                f = (self._max_src_pixels / (sw * sh)) ** 0.5
+                nw, nh = max(2, int(sw * f)), max(2, int(sh * f))
+                img = img.scaled(
+                    nw, nh,
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                )
+                sw, sh = img.width(), img.height()
+                if not self._downscaled:
+                    self._downscaled = True
+                    debug_log(f"FRAME: downscale na {sw}x{sh} (guard)")
+            self._last_proc_t = now
             if self._frames == 0:
                 debug_log(
                     f"FRAME: prvni snimek src={sw}x{sh} "
@@ -845,7 +1006,7 @@ class VideoWallpaperWindow(QWidget):
         self._dw, self._dh = 0, 0
 
     def stop(self):
-        debug_log(f"STOP: frames={self._frames} blits_ok={self._blits_ok} blit_fail={self._blit_fail}")
+        debug_log(f"STOP: frames={self._frames} skipped={self._skipped} blits_ok={self._blits_ok} blit_fail={self._blit_fail}")
         try:
             self.player.stop()
         except Exception:
@@ -869,7 +1030,9 @@ class DropZone(QFrame):
         self.setAcceptDrops(True)
         self.setFixedHeight(150)
         self.setCursor(Qt.PointingHandCursor)
-        self._set_style(BG_CARD, "#3a3c47")
+        self._has_file = False
+        self._hint = ""
+        self._set_style(T("card"), T("border"))
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
@@ -879,10 +1042,11 @@ class DropZone(QFrame):
         self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
         layout.addWidget(self.icon_label)
 
-        self.text_label = QLabel("Přetáhni sem obrázek nebo video\nnebo klikni pro výběr")
+        self.text_label = QLabel()
         self.text_label.setAlignment(Qt.AlignCenter)
-        self.text_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; background: transparent;")
+        self.text_label.setStyleSheet(f"color: {T('dim')}; font-size: 12px; background: transparent;")
         layout.addWidget(self.text_label)
+        self.set_hint(STRINGS["cs"]["drop_hint"])
 
     def _set_style(self, color, border):
         self.setStyleSheet(f"""
@@ -893,7 +1057,20 @@ class DropZone(QFrame):
             }}
         """)
 
+    def set_hint(self, text: str):
+        self._hint = text
+        if not self._has_file:
+            self.text_label.setText(text)
+
+    def refresh_style(self):
+        self.text_label.setStyleSheet(
+            f"color: {T('dim')}; font-size: 12px; background: transparent;"
+        )
+        self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
+        self._set_style(T("card"), ACCENT if self._has_file else T("border"))
+
     def set_file(self, path: str):
+        self._has_file = True
         name = os.path.basename(path)
         ext = os.path.splitext(path)[1].lower()
         if ext in IMAGE_EXTS:
@@ -908,15 +1085,15 @@ class DropZone(QFrame):
             self.icon_label.setText("🎬")
             self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
         self.text_label.setText(name)
-        self._set_style(BG_CARD, ACCENT)
+        self._set_style(T("card"), ACCENT)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self._set_style(BG_CARD_HOVER, ACCENT)
+            self._set_style(T("card_hover"), ACCENT)
 
     def dragLeaveEvent(self, event):
-        self._set_style(BG_CARD, "#3a3c47")
+        self._set_style(T("card"), T("border"))
 
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
@@ -929,69 +1106,186 @@ class DropZone(QFrame):
 
 
 # --------------------------------------------------------------------------
+# Stahovani videa z YouTube (yt-dlp) na pozadi, at nezamrzne UI
+# --------------------------------------------------------------------------
+YT_DIR = os.path.join(tempfile.gettempdir(), "wallmotion_yt")
+
+
+def resolve_downloaded_path(info: dict, ydl) -> str:
+    """Najde skutecny soubor stazeneho videa (po pripadnem mergu)."""
+    try:
+        req = info.get("requested_downloads")
+        if req:
+            fp = req[0].get("filepath")
+            if fp and os.path.exists(fp):
+                return fp
+    except Exception:
+        pass
+    try:
+        vid = info.get("id", "video")
+        for ext in ("mp4", "mkv", "webm", "avi", "mov"):
+            cand = os.path.join(YT_DIR, f"{vid}.{ext}")
+            if os.path.exists(cand):
+                return cand
+    except Exception:
+        pass
+    try:
+        return ydl.prepare_filename(info)
+    except Exception:
+        return ""
+
+
+class DownloadWorker(QThread):
+    progress = Signal(str)
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self.url = url.strip()
+
+    def run(self):
+        try:
+            import yt_dlp
+        except ImportError:
+            self.error.emit("yt-dlp není nainstalované (pip install yt-dlp)")
+            return
+        try:
+            os.makedirs(YT_DIR, exist_ok=True)
+
+            def hook(d):
+                try:
+                    if d.get("status") == "downloading":
+                        pct = (d.get("_percent_str") or "").strip()
+                        self.progress.emit(pct)
+                except Exception:
+                    pass
+
+            opts = {
+                # Bez ffmpeg nelze mergovat oddelene stopy, proto bereme
+                # nejlepsi JEDEN soubor: nejradsi progressive (se zvukem)
+                # do 1080p, jinak nejlepsi video do 1080p.
+                "format": "b[acodec!=none][height<=1080]/bv*[height<=1080]/b[height<=1080]/b",
+                "outtmpl": os.path.join(YT_DIR, "%(id)s.%(ext)s"),
+                "merge_output_format": "mp4",
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "noprogress": True,  # vlastni progress posilame signálem
+                "max_filesize": 500 * 1024 * 1024,  # pojistka proti GB videim
+                "progress_hooks": [hook],
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(self.url, download=True)
+                path = resolve_downloaded_path(info, ydl)
+            if path and os.path.exists(path):
+                self.finished.emit(path)
+            else:
+                self.error.emit("soubor se nenasel")
+        except Exception as e:
+            self.error.emit(str(e)[:300])
+
+
+# --------------------------------------------------------------------------
 # Hlavni okno aplikace
 # --------------------------------------------------------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Live Wallpaper")
-        self.setFixedSize(420, 505)
+        self.setFixedSize(430, 640)
 
         self.video_window = None
         self.selected_path = None
         self.original_wallpaper = get_current_wallpaper()
         self.screen_info = measure_screens()
+        self.lang = "cs"
+        self.theme = "dark"
+        self.yt_worker = None
 
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(10)
 
-        title = QLabel("Live Wallpaper")
-        title.setObjectName("title")
-        layout.addWidget(title)
+        self.title_label = QLabel("Live Wallpaper")
+        self.title_label.setObjectName("title")
+        layout.addWidget(self.title_label)
 
-        subtitle = QLabel("Nastav si obrázek nebo video jako pozadí plochy")
-        subtitle.setObjectName("subtitle")
-        layout.addWidget(subtitle)
+        self.subtitle_label = QLabel()
+        self.subtitle_label.setObjectName("subtitle")
+        layout.addWidget(self.subtitle_label)
 
         self.screen_label = QLabel()
         self.screen_label.setObjectName("status")
         layout.addWidget(self.screen_label)
-        self._refresh_screen_label()
+
+        # -- nastaveni: jazyk + motiv -------------------------------------
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(8)
+        self.lang_label = QLabel()
+        settings_row.addWidget(self.lang_label)
+        self.lang_combo = QComboBox()
+        for code, name in LANGS.items():
+            self.lang_combo.addItem(name, code)
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
+        settings_row.addWidget(self.lang_combo, 1)
+        self.theme_label = QLabel()
+        settings_row.addWidget(self.theme_label)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Tmavý", "dark")
+        self.theme_combo.addItem("Světlý", "light")
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        settings_row.addWidget(self.theme_combo, 1)
+        layout.addLayout(settings_row)
 
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self._on_file_chosen)
         self.drop_zone.clicked.connect(self.browse_file)
         layout.addWidget(self.drop_zone)
 
-        self.mute_checkbox = QCheckBox("Ztlumit zvuk videa")
+        # -- YouTube odkaz -------------------------------------------------
+        yt_row = QHBoxLayout()
+        yt_row.setSpacing(8)
+        self.yt_input = QLineEdit()
+        yt_row.addWidget(self.yt_input, 1)
+        self.yt_button = QPushButton()
+        self.yt_button.setObjectName("secondary")
+        self.yt_button.clicked.connect(self.download_youtube)
+        yt_row.addWidget(self.yt_button)
+        layout.addLayout(yt_row)
+
+        self.mute_checkbox = QCheckBox()
         self.mute_checkbox.setChecked(True)
+        self.mute_checkbox.toggled.connect(lambda _v: self._save_config())
         layout.addWidget(self.mute_checkbox)
 
-        apply_btn = QPushButton("Nastavit jako tapetu")
-        apply_btn.clicked.connect(self.apply_wallpaper)
-        layout.addWidget(apply_btn)
+        self.apply_btn = QPushButton()
+        self.apply_btn.clicked.connect(self.apply_wallpaper)
+        layout.addWidget(self.apply_btn)
 
-        measure_btn = QPushButton("Změřit obrazovku znovu")
-        measure_btn.setObjectName("secondary")
-        measure_btn.clicked.connect(self.remeasure_screen)
-        layout.addWidget(measure_btn)
+        self.measure_btn = QPushButton()
+        self.measure_btn.setObjectName("secondary")
+        self.measure_btn.clicked.connect(self.remeasure_screen)
+        layout.addWidget(self.measure_btn)
 
-        stop_btn = QPushButton("Zastavit / obnovit původní")
-        stop_btn.setObjectName("secondary")
-        stop_btn.clicked.connect(self.stop_wallpaper)
-        layout.addWidget(stop_btn)
+        self.stop_btn = QPushButton()
+        self.stop_btn.setObjectName("secondary")
+        self.stop_btn.clicked.connect(self.stop_wallpaper)
+        layout.addWidget(self.stop_btn)
 
         layout.addStretch()
 
-        self.status_label = QLabel("Připraveno.")
+        self.status_label = QLabel()
         self.status_label.setObjectName("status")
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
         self._init_tray()
-        self._load_last_config()
+        self._load_config()
+        self.apply_theme(self.theme, save=False)
+        self.retranslate()
 
     # -- tray ---------------------------------------------------------
     def _make_app_icon(self) -> QIcon:
@@ -1029,80 +1323,207 @@ class MainWindow(QMainWindow):
         self.tray = QSystemTrayIcon(self)
         self.tray.setIcon(app_icon)
         menu = QMenu()
-        show_action = QAction("Otevřít", self)
-        show_action.triggered.connect(self.showNormal)
-        quit_action = QAction("Ukončit", self)
-        quit_action.triggered.connect(self.quit_app)
-        menu.addAction(show_action)
-        menu.addAction(quit_action)
+        self.tray_show_action = QAction("Otevřít", self)
+        self.tray_show_action.triggered.connect(self.showNormal)
+        self.tray_quit_action = QAction("Ukončit", self)
+        self.tray_quit_action.triggered.connect(self.quit_app)
+        menu.addAction(self.tray_show_action)
+        menu.addAction(self.tray_quit_action)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(
             lambda reason: self.showNormal() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None
         )
         self.tray.show()
 
+    def S(self) -> dict:
+        return STRINGS.get(self.lang, STRINGS["cs"])
+
     # -- config ---------------------------------------------------------
-    def _load_last_config(self):
+    def _load_config(self):
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
+                lang = cfg.get("lang", "cs")
+                if lang in STRINGS:
+                    self.lang = lang
+                theme = cfg.get("theme", "dark")
+                if theme in THEMES:
+                    self.theme = theme
+                try:
+                    self.mute_checkbox.setChecked(bool(cfg.get("muted", True)))
+                except Exception:
+                    pass
                 path = cfg.get("last_path")
                 if path and os.path.exists(path):
                     self.selected_path = path
                     self.drop_zone.set_file(path)
             except Exception:
                 pass
+        # combo boxy nastavit bez vyvolani signalu
+        try:
+            self.lang_combo.blockSignals(True)
+            self.lang_combo.setCurrentIndex(list(LANGS).index(self.lang))
+            self.lang_combo.blockSignals(False)
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(0 if self.theme == "dark" else 1)
+            self.theme_combo.blockSignals(False)
+        except Exception:
+            pass
 
     def _save_config(self):
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump({"last_path": self.selected_path}, f)
+                json.dump({
+                    "last_path": self.selected_path,
+                    "lang": self.lang,
+                    "theme": self.theme,
+                    "muted": self.mute_checkbox.isChecked(),
+                }, f)
         except Exception:
             pass
 
+    # -- motiv + jazyk ---------------------------------------------------------
+    def apply_theme(self, theme: str, save: bool = True):
+        if theme not in THEMES:
+            theme = "dark"
+        self.theme = theme
+        CURRENT_THEME.clear()
+        CURRENT_THEME.update(THEMES[theme])
+        try:
+            QApplication.instance().setStyleSheet(build_stylesheet(theme))
+        except Exception:
+            pass
+        try:
+            self.drop_zone.refresh_style()
+        except Exception:
+            pass
+        if save:
+            self._save_config()
+
+    def _on_theme_changed(self, _index: int):
+        theme = self.theme_combo.currentData() or "dark"
+        self.apply_theme(theme)
+        self.retranslate()
+
+    def _on_lang_changed(self, _index: int):
+        lang = self.lang_combo.currentData() or "cs"
+        if lang not in STRINGS:
+            lang = "cs"
+        self.lang = lang
+        self._save_config()
+        self.retranslate()
+
+    def retranslate(self):
+        s = self.S()
+        self.subtitle_label.setText(s["subtitle"])
+        self.lang_label.setText(s["lang_label"])
+        self.theme_label.setText(s["theme_label"])
+        # texty v comboboxech motivu
+        try:
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setItemText(0, s["theme_dark"])
+            self.theme_combo.setItemText(1, s["theme_light"])
+            self.theme_combo.blockSignals(False)
+        except Exception:
+            pass
+        self.drop_zone.set_hint(s["drop_hint"])
+        self.mute_checkbox.setText(s["mute"])
+        self.apply_btn.setText(s["apply"])
+        self.measure_btn.setText(s["measure"])
+        self.stop_btn.setText(s["stop"])
+        self.yt_input.setPlaceholderText(s["yt_placeholder"])
+        self.yt_button.setText(s["yt_button"])
+        if not self.status_label.text():
+            self.status_label.setText(s["ready"])
+        try:
+            self.tray_show_action.setText(s["open_tray"])
+            self.tray_quit_action.setText(s["quit_tray"])
+        except Exception:
+            pass
+        self._refresh_screen_label()
+
+    # -- YouTube ---------------------------------------------------------
+    def download_youtube(self):
+        s = self.S()
+        url = self.yt_input.text().strip()
+        if not url:
+            self.status_label.setText(s["warn_nofile_m"])
+            return
+        if self.yt_worker is not None and self.yt_worker.isRunning():
+            return
+        self.yt_button.setEnabled(False)
+        self.status_label.setText(s["yt_downloading"].format(p="0%"))
+        debug_log(f"YT: stahuji {url}")
+        self.yt_worker = DownloadWorker(url, self)
+        self.yt_worker.progress.connect(self._on_yt_progress)
+        self.yt_worker.finished.connect(self._on_yt_finished)
+        self.yt_worker.error.connect(self._on_yt_error)
+        self.yt_worker.finished.connect(lambda _p: self.yt_button.setEnabled(True))
+        self.yt_worker.error.connect(lambda _e: self.yt_button.setEnabled(True))
+        self.yt_worker.start()
+
+    def _on_yt_progress(self, pct: str):
+        self.status_label.setText(self.S()["yt_downloading"].format(p=pct))
+
+    def _on_yt_finished(self, path: str):
+        s = self.S()
+        debug_log(f"YT: stazeno {path}")
+        self.status_label.setText(s["yt_done"])
+        self._on_file_chosen(path)
+        # po stazeni rovnou nastavit jako tapetu
+        self.apply_wallpaper()
+
+    def _on_yt_error(self, err: str):
+        debug_log(f"YT CHYBA: {err}")
+        self.status_label.setText(self.S()["yt_error"].format(e=err))
+
     # -- obrazovka ---------------------------------------------------------
     def _refresh_screen_label(self):
+        s = self.S()
         screens = self.screen_info.get("screens", [])
         pw, ph = self.screen_info.get("primary", (0, 0))
         if not screens:
-            self.screen_label.setText("🖥 Obrazovka: nezjištěna")
+            self.screen_label.setText(s["screen_unknown"])
             return
         if len(screens) == 1:
-            self.screen_label.setText(f"🖥 Obrazovka: {pw} × {ph}")
+            self.screen_label.setText(s["screen_one"].format(w=pw, h=ph))
         else:
             parts = " + ".join(
-                f"{s['physical_width']}×{s['physical_height']}" for s in screens
+                f"{x['physical_width']}×{x['physical_height']}" for x in screens
             )
             self.screen_label.setText(
-                f"🖥 Obrazovky ({len(screens)}): {parts} | primární {pw} × {ph}"
+                s["screen_multi"].format(n=len(screens), parts=parts, w=pw, h=ph)
             )
 
     def remeasure_screen(self):
         self.screen_info = measure_screens()
         self._refresh_screen_label()
         pw, ph = self.screen_info.get("primary", (0, 0))
-        self.status_label.setText(f"Obrazovka změřena: {pw} × {ph}.")
+        self.status_label.setText(self.S()["measured"].format(w=pw, h=ph))
 
     # -- UI actions ---------------------------------------------------------
     def browse_file(self):
-        filters = "Obrázky a videa (*.jpg *.jpeg *.png *.bmp *.gif *.mp4 *.avi *.mkv *.mov *.wmv *.webm)"
-        path, _ = QFileDialog.getOpenFileName(self, "Vyber soubor", "", filters)
+        s = self.S()
+        filters = "Obrázky a videa / Images & videos (*.jpg *.jpeg *.png *.bmp *.gif *.mp4 *.avi *.mkv *.mov *.wmv *.webm)"
+        path, _ = QFileDialog.getOpenFileName(self, s["apply"], "", filters)
         if path:
             self._on_file_chosen(path)
 
     def _on_file_chosen(self, path: str):
+        s = self.S()
         ext = os.path.splitext(path)[1].lower()
         if ext not in IMAGE_EXTS and ext not in VIDEO_EXTS:
-            QMessageBox.warning(self, "Nepodporovaný formát", "Tento typ souboru není podporovaný.")
+            QMessageBox.warning(self, s["warn_unsupported_t"], s["warn_unsupported_m"])
             return
         self.selected_path = path
         self.drop_zone.set_file(path)
-        self.status_label.setText("Soubor vybrán. Klikni na „Nastavit jako tapetu“.")
+        self.status_label.setText(s["file_selected"])
 
     def apply_wallpaper(self):
+        s = self.S()
         if not self.selected_path:
-            QMessageBox.warning(self, "Chybí soubor", "Nejdřív vyber obrázek nebo video.")
+            QMessageBox.warning(self, s["warn_nofile_t"], s["warn_nofile_m"])
             return
 
         if self.video_window is not None:
@@ -1120,25 +1541,24 @@ class MainWindow(QMainWindow):
         if ext in IMAGE_EXTS:
             fitted = fit_image_to_screen(self.selected_path, pw, ph)
             set_static_wallpaper(fitted)
-            self.status_label.setText(f"Obrázek upraven na {pw} × {ph} a nastaven.")
+            self.status_label.setText(s["img_set"].format(w=pw, h=ph))
         elif ext in VIDEO_EXTS:
             self.video_window = VideoWallpaperWindow(
                 self.selected_path, muted=self.mute_checkbox.isChecked()
             )
             if self.video_window.start():
-                self.status_label.setText(f"Video tapeta běží na pozadí ({pw} × {ph}).")
+                self.status_label.setText(s["vid_running"].format(w=pw, h=ph))
                 self.tray.showMessage(
-                    "Live Wallpaper", "Video tapeta byla spuštěna.",
+                    s["app_name"], s["vid_started_msg"],
                     QSystemTrayIcon.MessageIcon.Information, 3000
                 )
             else:
                 self.video_window.stop()
                 self.video_window = None
-                self.status_label.setText("Video se nepodařilo vložit na plochu.")
+                self.status_label.setText(s["vid_fail_m"].format(log=DEBUG_LOG))
                 QMessageBox.warning(
-                    self, "Video tapeta",
-                    "Nepodařilo se vložit video na plochu (WorkerW nenalezeno).\n"
-                    f"Detail v souboru {DEBUG_LOG}",
+                    self, s["vid_fail_t"],
+                    s["vid_fail_m"].format(log=DEBUG_LOG),
                 )
                 return
         else:
@@ -1152,13 +1572,14 @@ class MainWindow(QMainWindow):
             self.video_window = None
         if self.original_wallpaper:
             set_static_wallpaper(self.original_wallpaper)
-        self.status_label.setText("Původní tapeta byla obnovena.")
+        self.status_label.setText(self.S()["restored"])
 
     def closeEvent(self, event):
+        s = self.S()
         event.ignore()
         self.hide()
         self.tray.showMessage(
-            "Live Wallpaper", "Aplikace běží na pozadí v systémové liště.",
+            s["app_name"], s["hidden_tray_msg"],
             QSystemTrayIcon.MessageIcon.Information, 2000
         )
 
@@ -1189,7 +1610,7 @@ def main():
     debug_log("APP start")
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    app.setStyleSheet(STYLESHEET)
+    app.setStyleSheet(build_stylesheet("dark"))
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

@@ -188,6 +188,17 @@ def _ensure_canvas_class() -> bool:
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".live_wallpaper_config.json")
 
 
+def _asset_path(name: str) -> str:
+    """Cesta k souboru v assets/ (funguje i ve zmrazenem EXE pres _MEIPASS)."""
+    try:
+        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
+            os.path.abspath(__file__)
+        )
+    except Exception:
+        base = ""
+    return os.path.join(base, "assets", name)
+
+
 def _quiet_ffmpeg(level: int = 8) -> bool:
     """Ztisi nativni FFmpeg logy (Input #0, MFT, ...), ktere jdou primo na
     stderr mimo Qt logovani, takze je QT_LOGGING_RULES nechyti.
@@ -1382,8 +1393,17 @@ class MainWindow(QMainWindow):
 
     # -- tray ---------------------------------------------------------
     def _make_app_icon(self) -> QIcon:
-        # Na Windows fromTheme vzdy vrati null, tak vyrobime jednoduchou
-        # fialovou ikonu programove, at tray nikdy neni bez ikony.
+        # Primarne ikona ze souboru assets/icon.png (monitor s play).
+        try:
+            p = _asset_path("icon.png")
+            if os.path.exists(p):
+                icon = QIcon(p)
+                if not icon.isNull():
+                    return icon
+        except Exception:
+            pass
+        # Fallback: jednoducha fialova ikona programove, at tray nikdy
+        # neni bez ikony (na Windows fromTheme vzdy vrati null).
         try:
             pix = QPixmap(64, 64)
             pix.fill(Qt.transparent)
@@ -1396,7 +1416,7 @@ class MainWindow(QMainWindow):
             p.drawRoundedRect(4, 4, 56, 56, 14, 14)
             p.setPen(QColor("#ffffff"))
             p.setFont(QFont("Segoe UI", 30, QFont.Bold))
-            p.drawText(pix.rect(), Qt.AlignCenter, "L")
+            p.drawText(pix.rect(), Qt.AlignCenter, "W")
             p.end()
             return QIcon(pix)
         except Exception:

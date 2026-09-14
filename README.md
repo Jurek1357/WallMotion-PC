@@ -6,11 +6,11 @@
 
 A lightweight Wallpaper Engine alternative for **Windows 10/11**:
 
-- 🖼️ **Image wallpaper** – auto-fitted to your exact screen resolution
-- 🎬 **Video wallpaper** – loops behind the desktop icons, clicks pass through
-- ▶️ **YouTube support** – paste a link, the video downloads in the background and sets itself as wallpaper (H264/VP9 up to 1080p, files up to 500 MB)
-- 🌗 **Dark / light themes** and 🇨🇿/🇬🇧 **Czech / English UI**, remembered between launches
-- 📏 **Screen measurement** – detects resolution of all monitors (physical pixels, HiDPI aware)
+- **Image wallpaper** – auto-fitted to your exact screen resolution
+- **Video wallpaper** – loops behind the desktop icons, clicks pass through
+- **YouTube support** – paste a link, the video downloads in the background and sets itself as wallpaper (H264/VP9 up to 1080p, files up to 500 MB)
+- **Dark / light themes** and **Czech / English UI**, remembered between launches
+- **Screen measurement** – detects resolution of all monitors (physical pixels, HiDPI aware)
 
 ### How it works
 
@@ -72,11 +72,11 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 
 Lehká náhrada Wallpaper Engine pro **Windows 10/11**:
 
-- 🖼️ **Tapeta z obrázku** – automaticky upravená přesně na rozlišení obrazovky
-- 🎬 **Tapeta z videa** – smyčkově hraje za ikonami plochy, kliky propadají skrz
-- ▶️ **YouTube podpora** – vlož odkaz, video se stáhne na pozadí a samo nastaví jako tapeta (H264/VP9 do 1080p, soubory do 500 MB)
-- 🌗 **Tmavý / světlý motiv** a 🇨🇿/🇬🇧 **čeština / angličtina**, pamatuje se pro příště
-- 📏 **Měření obrazovky** – zjistí rozlišení všech monitorů (fyzické pixely, HiDPI aware)
+- **Tapeta z obrázku** – automaticky upravená přesně na rozlišení obrazovky
+- **Tapeta z videa** – smyčkově hraje za ikonami plochy, kliky propadají skrz
+- **YouTube podpora** – vlož odkaz, video se stáhne na pozadí a samo nastaví jako tapeta (H264/VP9 do 1080p, soubory do 500 MB)
+- **Tmavý / světlý motiv** a **čeština / angličtina**, pamatuje se pro příště
+- **Měření obrazovky** – zjistí rozlišení všech monitorů (fyzické pixely, HiDPI aware)
 
 ### Jak to funguje
 

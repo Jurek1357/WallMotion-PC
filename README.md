@@ -4,57 +4,56 @@
 
 ## English
 
-A simple Wallpaper Engine alternative for **Windows 10/11**. It can:
+A lightweight Wallpaper Engine alternative for **Windows 10/11**:
 
-- set an **image** as the classic desktop wallpaper (auto-fitted to your screen resolution),
-- set a **video (mp4 and more)** as a live wallpaper that loops behind the desktop icons,
-- **download a video from a YouTube link** and set it as wallpaper in one click (yt-dlp, best single file up to 1080p, max 500 MB),
-- switch **UI language (Czech / English)** and **theme (dark / light)** – saved to config.
-
-No console needed: run the ready-made **`dist/WallMotion.exe`** (built with PyInstaller), or run from source below.
+- 🖼️ **Image wallpaper** – auto-fitted to your exact screen resolution
+- 🎬 **Video wallpaper** – loops behind the desktop icons, clicks pass through
+- ▶️ **YouTube support** – paste a link, the video downloads in the background and sets itself as wallpaper (H264/VP9 up to 1080p, files up to 500 MB)
+- 🌗 **Dark / light themes** and 🇨🇿/🇬🇧 **Czech / English UI**, remembered between launches
+- 📏 **Screen measurement** – detects resolution of all monitors (physical pixels, HiDPI aware)
 
 ### How it works
 
-- **Image:** resized/cropped to match the measured screen resolution, then set via `SystemParametersInfo`.
-- **Video:** decoded with Qt Multimedia (`QMediaPlayer` + `QVideoSink`), frames are painted with GDI (`StretchDIBits`) onto a native window embedded in the desktop:
-  - on Windows 11 ("raised desktop") as a `WS_EX_LAYERED` child of `Progman`, z-ordered between `WorkerW` and `SHELLDLL_DefView` (same technique as Lively / Wallpaper Engine),
-  - on older Windows as a child of the `WorkerW` window created via message `0x052C`.
-- Clicks pass through to the desktop/icons (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
+- **Image:** resized/cropped to the measured resolution and set via `SystemParametersInfo`.
+- **Video:** decoded with Qt Multimedia (`QMediaPlayer` + `QVideoSink`); frames are painted with GDI (`StretchDIBits`, fast `COLORONCOLOR` stretch, ~6 ms/frame at 1080p) onto a native window:
+  - on Windows 11 ("raised desktop") as an opaque `WS_EX_LAYERED` child of `Progman`, z-ordered `WorkerW` → **video** → `SHELLDLL_DefView` (same technique as Lively / Wallpaper Engine, per Microsoft guidance),
+  - on older Windows as a child of the `WorkerW` window spawned with message `0x052C`.
+- Safety guards: frame throttling (~40 fps max, no memory backlog), auto-downscale of 4K/8K frames, and a watchdog that removes the canvas with a clear message if a video produces no frames (e.g. AV1 files, which Qt can't decode here – the downloader avoids them automatically).
+- Clicks and focus never get stolen (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
 
-### 1. Install
+### Install & run (from source)
 
-You need Python 3.9+ on Windows.
+Requires Python 3.9+ on Windows.
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Run
-
-```bash
 python main.py
 ```
 
-A small window opens – drop an image/video (or click to browse) and hit **"Nastavit jako tapetu" (Set as wallpaper)**. For video the app must keep running (closing the window only hides it to the system tray, so the player keeps animating the wallpaper). Quit via the tray icon → "Ukončit" (Quit).
+Drop an image/video onto the window (or click to browse) and hit **Set as wallpaper**. For video the app must keep running – closing the window only hides it to the system tray. Quit via tray icon → Quit.
 
-The **"Zastavit / obnovit původní" (Stop / restore original)** button stops the video wallpaper and restores the wallpaper that was set before the app started. **"Změřit obrazovku znovu" (Re-measure screen)** re-detects the screen resolution (useful after plugging in a monitor).
+- **Stop / restore original** – stops the video and restores the previous wallpaper.
+- **Re-measure display** – re-detects resolution (e.g. after plugging in a monitor).
+- **YouTube field** – paste a link, hit the button, download runs on a background thread with progress in the status line.
+- Language/theme dropdowns are at the top; everything (incl. last file and mute) is saved to `%USERPROFILE%\.live_wallpaper_config.json`.
+- Debug log (if anything misbehaves): `%TEMP%\live_wallpaper_debug.log`.
 
-Paste a **YouTube link** into the field and hit the download button – the video downloads in the background (progress in the status line) to a temp folder and is then set as wallpaper automatically. Language and theme are switched with the dropdowns at the top (Czech is the default) and remembered next launch.
+### Standalone .exe
 
-### 3. Optional: build a .exe
+```
+dist\WallMotion.exe
+```
 
-So the app runs without an installed Python, package it with PyInstaller:
+Built with PyInstaller (`--onefile --windowed`), ~65 MB, needs no Python installed. To rebuild:
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name LiveWallpaper main.py
+python -m PyInstaller --onefile --windowed --name WallMotion --noconfirm main.py
 ```
 
-The resulting `.exe` will be in `dist/`.
+### Autostart with Windows
 
-### 4. Optional: start automatically with Windows
-
-Place a shortcut to `LiveWallpaper.exe` (or `main.py`) in:
+Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 
 ```
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
@@ -62,66 +61,65 @@ Place a shortcut to `LiveWallpaper.exe` (or `main.py`) in:
 
 ### Known limitations
 
-- Single-monitor focused (primary screen); multi-monitor spanning can be added.
-- Supported video formats depend on codecs available through Qt Multimedia (mp4/H.264 works out of the box).
-- The video wallpaper disappears when the app/PC restarts until you launch the app again (see autostart above).
-- GDI software rendering is used on purpose (Qt never paints a reparented window); 1080p@30fps costs roughly 6 ms/frame.
+- Primary-monitor focused; multi-monitor spanning is a possible extension.
+- Video formats depend on Qt Multimedia codecs (mp4/H.264 works out of the box; AV1 files are refused with a message).
+- The video wallpaper needs the app running – after a reboot, launch it again (or use autostart).
+- YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it).
 
 ---
 
 ## Čeština
 
-Jednoduchá náhrada Wallpaper Engine pro **Windows 10/11**. Umí:
+Lehká náhrada Wallpaper Engine pro **Windows 10/11**:
 
-- nastavit **obrázek** jako klasickou tapetu plochy (automaticky upravený na rozlišení obrazovky),
-- nastavit **video (mp4 a další)** jako živou tapetu, která se smyčkově přehrává za ikonami plochy,
-- **stáhnout video z YouTube odkazu** a jedním klikem ho nastavit jako tapetu (yt-dlp, nejlepší jeden soubor do 1080p, max 500 MB),
-- přepínat **jazyk UI (čeština / angličtina)** a **motiv (tmavý / světlý)** – ukládá se do configu.
-
-Bez konzole: spusť hotové **`dist/WallMotion.exe`** (sbalené přes PyInstaller), nebo ze zdrojáků níže.
+- 🖼️ **Tapeta z obrázku** – automaticky upravená přesně na rozlišení obrazovky
+- 🎬 **Tapeta z videa** – smyčkově hraje za ikonami plochy, kliky propadají skrz
+- ▶️ **YouTube podpora** – vlož odkaz, video se stáhne na pozadí a samo nastaví jako tapeta (H264/VP9 do 1080p, soubory do 500 MB)
+- 🌗 **Tmavý / světlý motiv** a 🇨🇿/🇬🇧 **čeština / angličtina**, pamatuje se pro příště
+- 📏 **Měření obrazovky** – zjistí rozlišení všech monitorů (fyzické pixely, HiDPI aware)
 
 ### Jak to funguje
 
-- **Obrázek:** ořízne/přizpůsobí se změřenému rozlišení obrazovky a nastaví přes `SystemParametersInfo`.
-- **Video:** dekóduje Qt Multimedia (`QMediaPlayer` + `QVideoSink`), snímky se malují přes GDI (`StretchDIBits`) do nativního okna vnořeného do plochy:
-  - na Windows 11 („raised desktop“) jako `WS_EX_LAYERED` potomek `Progmanu`, vrstveně mezi `WorkerW` a `SHELLDLL_DefView` (stejný postup jako Lively / Wallpaper Engine),
+- **Obrázek:** ořízne se na změřené rozlišení a nastaví přes `SystemParametersInfo`.
+- **Video:** dekóduje Qt Multimedia (`QMediaPlayer` + `QVideoSink`), snímky se malují přes GDI (`StretchDIBits`, rychlý `COLORONCOLOR` stretch, cca 6 ms/snímek při 1080p) do nativního okna:
+  - na Windows 11 („raised desktop“) jako neprůhledný `WS_EX_LAYERED` potomek `Progmanu`, ve vrstvách `WorkerW` → **video** → `SHELLDLL_DefView` (stejný postup jako Lively / Wallpaper Engine, dle Microsoftu),
   - na starších Windows jako potomek okna `WorkerW` vytvořeného zprávou `0x052C`.
-- Kliky propadají na plochu/ikony (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
+- Pojistky: throttle snímků (max ~40/s, fronta se nenafukuje), auto-zmenšení 4K/8K snímků a watchdog, který při nulovém počtu snímků plátno zruší s hláškou (např. AV1 soubory, které Qt tu nedekóduje – stahovač se jim automaticky vyhýbá).
+- Kliky ani focus se nekradou (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
 
-### 1. Instalace
+### Instalace a spuštění (ze zdrojáků)
 
 Potřebuješ Python 3.9+ na Windows.
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Spuštění
-
-```bash
 python main.py
 ```
 
-Otevře se malé okno – přetáhni obrázek/video (nebo klikni pro výběr) a stiskni **„Nastavit jako tapetu“**. U videa musí aplikace běžet dál (zavření okna křížkem ji jen schová do systémové lišty, aby přehrávač dál animoval tapetu). Ukončíš ji přes ikonu v liště → „Ukončit“.
+Přetáhni obrázek/video do okna (nebo klikni pro výběr) a stiskni **Nastavit jako tapetu**. U videa musí aplikace běžet dál – zavření okna křížkem ji jen schová do systémové lišty. Ukončíš ji přes ikonu v liště → Ukončit.
 
-Tlačítko **„Zastavit / obnovit původní“** video tapetu vypne a vrátí tapetu, která byla nastavená před spuštěním appky. Tlačítko **„Změřit obrazovku znovu“** znovu změří rozlišení (hodí se po připojení monitoru).
+- **Zastavit / obnovit původní** – vypne video a vrátí předchozí tapetu.
+- **Změřit obrazovku znovu** – znovu změří rozlišení (třeba po připojení monitoru).
+- **YouTube políčko** – vlož odkaz, stiskni tlačítko, stahování běží ve vlákně na pozadí s průběhem ve stavovém řádku.
+- Jazyk/motiv se přepíná roletkami nahoře; vše (včetně posledního souboru a ztlumení) se ukládá do `%USERPROFILE%\.live_wallpaper_config.json`.
+- Debug log (kdyby něco zlobilo): `%TEMP%\live_wallpaper_debug.log`.
 
-**YouTube odkaz** vlož do políčka a stiskni tlačítko stahování – video se stáhne na pozadí (průběh ve stavovém řádku) do dočasné složky a pak se automaticky nastaví jako tapeta. Jazyk a motiv se přepínají roletkami nahoře (výchozí čeština) a pamatují se pro příští spuštění.
+### Samostatné .exe
 
-### 3. Volitelné: sbalení do .exe
+```
+dist\WallMotion.exe
+```
 
-Aby appka nepotřebovala nainstalovaný Python, zabal ji přes PyInstaller:
+Sbalené přes PyInstaller (`--onefile --windowed`), cca 65 MB, nepotřebuje Python. Rebuild:
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name LiveWallpaper main.py
+python -m PyInstaller --onefile --windowed --name WallMotion --noconfirm main.py
 ```
 
-Výsledné `.exe` najdeš ve složce `dist/`.
+### Autostart s Windows
 
-### 4. Volitelné: spouštět automaticky při startu Windows
-
-Zkratku na `LiveWallpaper.exe` (nebo na `main.py`) umísti do:
+Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 
 ```
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
@@ -129,7 +127,7 @@ Zkratku na `LiveWallpaper.exe` (nebo na `main.py`) umísti do:
 
 ### Známá omezení
 
-- Primárně jeden monitor (primární obrazovka); roztažení přes víc monitorů jde doplnit.
-- Podporované formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 funguje bez problémů).
-- Video tapeta zmizí po restartu appky/PC, dokud appku znovu nespustíš (viz autostart výše).
-- Záměrně se používá softwarové GDI vykreslování (Qt vnořené okno nikdy nevykreslí); 1080p@30fps stojí cca 6 ms/snímek.
+- Primárně jeden (primární) monitor; roztažení přes víc monitorů jde doplnit.
+- Formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 bez problémů; AV1 soubory se odmítnou s hláškou).
+- Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
+- Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`).

@@ -1,10 +1,14 @@
 """Tests for YouTube URL validation and format selectors.
 
-These cover the pure logic in main.py — no display or Win32 required,
-so they run on any OS (imports in main.py are platform-guarded).
+These cover the pure logic in wallmotion.youtube — no display or Win32
+required, so they run on any OS.
 """
 
-from main import _YT_FORMAT_MERGED, _YT_FORMAT_SINGLE, is_valid_youtube_url
+from wallmotion.youtube import (
+    _YT_FORMAT_MERGED,
+    _YT_FORMAT_SINGLE,
+    is_valid_youtube_url,
+)
 
 
 class TestValidUrls:

@@ -245,6 +245,10 @@ class MainWindow(QMainWindow):
         self.volume_slider.setValue(30)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         vol_row.addWidget(self.volume_slider, 1)
+        self.volume_value = QLabel("30%")
+        self.volume_value.setFixedWidth(42)
+        self.volume_value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        vol_row.addWidget(self.volume_value)
         layout.addLayout(vol_row)
 
         self.apply_btn = QPushButton()
@@ -353,6 +357,7 @@ class MainWindow(QMainWindow):
                     self.volume_slider.blockSignals(True)
                     self.volume_slider.setValue(int(cfg.get("volume", 30)))
                     self.volume_slider.blockSignals(False)
+                    self.volume_value.setText(f"{self.volume_slider.value()}%")
                 except Exception:
                     pass
                 path = cfg.get("last_path")
@@ -396,6 +401,7 @@ class MainWindow(QMainWindow):
 
     def _on_volume_changed(self, value: int):
         """Ulozit hlasitost a okamzite ji nastavit bezici tapete."""
+        self.volume_value.setText(f"{int(value)}%")
         self._save_config()
         try:
             if self.video_window is not None:

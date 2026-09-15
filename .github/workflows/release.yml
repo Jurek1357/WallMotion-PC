@@ -27,7 +27,7 @@ jobs:
           --icon assets\icon.ico --add-data "assets;assets" --noconfirm main.py
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/WallMotion.exe
           generate_release_notes: true

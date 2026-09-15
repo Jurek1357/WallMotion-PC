@@ -1,0 +1,13 @@
+# Tooling configuration. This project is not yet packaged for pip;
+# [project] metadata lands together with the wallmotion/ package split.
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

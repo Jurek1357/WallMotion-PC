@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in WallMotion misbehaves
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please fill in what you can — every field helps.
+  - type: input
+    id: version
+    attributes:
+      label: WallMotion version
+      description: Release tag or "running from source"
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2 (build 22631)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is affected
+      options:
+        - Video wallpaper
+        - Static image wallpaper
+        - YouTube download
+        - Sound / volume
+        - UI / themes / language
+        - App startup / tray
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open the app\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: debuglog
+    attributes:
+      label: Debug log
+      description: Paste the end of %TEMP%\live_wallpaper_debug.log (or attach the file)
+      render: text

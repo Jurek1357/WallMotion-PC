@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/Jurek1357/WallMotion-PC/discussions
+    about: Please use Discussions for questions and ideas, not issues.
+  - name: Security vulnerability
+    url: https://github.com/Jurek1357/WallMotion-PC/security/advisories/new
+    about: Report security issues privately via GitHub Security Advisories.

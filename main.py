@@ -21,31 +21,51 @@ Spusteni:
     python main.py
 """
 
-import sys
-import os
+from __future__ import annotations
+
 import ctypes
 import ipaddress
 import json
+import os
 import shutil
+import sys
 import tempfile
 import time
 import urllib.parse
 
-from PySide6.QtCore import Qt, QUrl, Signal, QLoggingCategory, QThread, QTimer
-from PySide6.QtGui import QIcon, QAction, QPixmap, QImage, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import QLoggingCategory, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon, QImage, QPixmap
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame, QVideoSink
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QSystemTrayIcon, QMenu,
-    QMessageBox, QCheckBox, QFrame, QComboBox, QLineEdit, QSlider
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
 
-import win32gui
-import win32con
-import win32api
+# Win32-only moduly: na Linuxu/macOS modul zustane importovatelny
+# (testy, CI, budouci Linux backend), ale funkce tapety jsou Windows-only.
+if sys.platform == "win32":
+    import win32api
+    import win32con
+    import win32gui
+else:
+    win32gui = win32con = win32api = None
 
 # --- GDI konstanty pro vykreslovani videa primo na plochu -------------------
-_GDI32 = ctypes.windll.gdi32
+_GDI32 = ctypes.windll.gdi32 if sys.platform == "win32" else None
 _SRCCOPY = 0x00CC0020
 _DIB_RGB_COLORS = 0
 _HALFTONE = 4
@@ -105,7 +125,7 @@ except Exception:
 
 
 # --- Nativni Win32 platno pro video (misto Qt okna) ---------------------------
-_USER32 = ctypes.windll.user32
+_USER32 = ctypes.windll.user32 if sys.platform == "win32" else None
 _WS_CHILD = 0x40000000
 _WS_VISIBLE = 0x10000000
 _WS_CLIPCHILDREN = 0x02000000
@@ -354,7 +374,11 @@ STRINGS = {
         "yt_error": "Stažení selhalo: {e}",
         "yt_invalid_url": "Neplatný nebo nepodporovaný YouTube odkaz.",
         "open_folder": "Otevřít složku videí",
-        "yt_need_ffmpeg": "Toto video má obraz a zvuk odděleně – nainstaluj ffmpeg (do terminálu napiš: winget install ffmpeg), restartuj aplikaci a stáhni ho znovu.",
+        "yt_need_ffmpeg": (
+            "Toto video má obraz a zvuk odděleně – nainstaluj ffmpeg "
+            "(do terminálu napiš: winget install ffmpeg), restartuj aplikaci "
+            "a stáhni ho znovu."
+        ),
         "lang_label": "Jazyk:",
         "theme_label": "Motiv:",
         "theme_dark": "Tmavý",
@@ -374,7 +398,11 @@ STRINGS = {
         "vid_fail_t": "Video tapeta",
         "vid_fail_m": "Nepodařilo se vložit video na plochu (WorkerW nenalezeno).\nDetail v souboru {log}",
         "vid_decode_t": "Video se nepodařilo přehrát",
-        "vid_decode_m": "Z videa nepřišel ani jeden snímek (pravděpodobně nepodporovaný kodek, např. AV1/VP9 bez zvuku ve vysokém rozlišení). Zkus jiné video, ideálně H264 mp4 do 1080p.",
+        "vid_decode_m": (
+            "Z videa nepřišel ani jeden snímek (pravděpodobně nepodporovaný "
+            "kodek, např. AV1/VP9 bez zvuku ve vysokém rozlišení). "
+            "Zkus jiné video, ideálně H264 mp4 do 1080p."
+        ),
         "app_name": "Live Wallpaper",
     },
     "en": {
@@ -397,7 +425,10 @@ STRINGS = {
         "yt_error": "Download failed: {e}",
         "yt_invalid_url": "Invalid or unsupported YouTube link.",
         "open_folder": "Open videos folder",
-        "yt_need_ffmpeg": "This video has separate video and audio tracks – install ffmpeg (run: winget install ffmpeg), restart the app and download it again.",
+        "yt_need_ffmpeg": (
+            "This video has separate video and audio tracks – install ffmpeg "
+            "(run: winget install ffmpeg), restart the app and download it again."
+        ),
         "lang_label": "Language:",
         "theme_label": "Theme:",
         "theme_dark": "Dark",
@@ -417,7 +448,11 @@ STRINGS = {
         "vid_fail_t": "Video wallpaper",
         "vid_fail_m": "Could not embed the video into the desktop (WorkerW not found).\nSee {log}",
         "vid_decode_t": "Could not play the video",
-        "vid_decode_m": "No frames arrived from the video (likely an unsupported codec, e.g. AV1/VP9-only high-resolution file). Try a different video, ideally H264 mp4 up to 1080p.",
+        "vid_decode_m": (
+            "No frames arrived from the video (likely an unsupported codec, "
+            "e.g. AV1/VP9-only high-resolution file). Try a different video, "
+            "ideally H264 mp4 up to 1080p."
+        ),
         "app_name": "Live Wallpaper",
     },
 }
@@ -1149,7 +1184,10 @@ class VideoWallpaperWindow(QWidget):
         self._dw, self._dh = 0, 0
 
     def stop(self):
-        debug_log(f"STOP: frames={self._frames} skipped={self._skipped} blits_ok={self._blits_ok} blit_fail={self._blit_fail}")
+        debug_log(
+            f"STOP: frames={self._frames} skipped={self._skipped} "
+            f"blits_ok={self._blits_ok} blit_fail={self._blit_fail}"
+        )
         try:
             self.player.stop()
         except Exception:
@@ -1618,7 +1656,7 @@ class MainWindow(QMainWindow):
         try:
             pix = QPixmap(64, 64)
             pix.fill(Qt.transparent)
-            from PySide6.QtGui import QPainter, QColor, QFont
+            from PySide6.QtGui import QColor, QFont, QPainter
 
             p = QPainter(pix)
             p.setRenderHint(QPainter.Antialiasing)
@@ -1666,7 +1704,7 @@ class MainWindow(QMainWindow):
     def _load_config(self):
         if os.path.exists(CONFIG_PATH):
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                with open(CONFIG_PATH, encoding="utf-8") as f:
                     cfg = json.load(f)
                 lang = cfg.get("lang", "cs")
                 if lang in STRINGS:
@@ -1879,7 +1917,10 @@ class MainWindow(QMainWindow):
     # -- UI actions ---------------------------------------------------------
     def browse_file(self):
         s = self.S()
-        filters = "Obrázky a videa / Images & videos (*.jpg *.jpeg *.png *.bmp *.gif *.mp4 *.avi *.mkv *.mov *.wmv *.webm)"
+        filters = (
+            "Obrázky a videa / Images & videos "
+            "(*.jpg *.jpeg *.png *.bmp *.gif *.mp4 *.avi *.mkv *.mov *.wmv *.webm)"
+        )
         path, _ = QFileDialog.getOpenFileName(self, s["apply"], "", filters)
         if path:
             self._on_file_chosen(path)

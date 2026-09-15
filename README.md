@@ -1,5 +1,9 @@
 # WallMotion PC – Live Wallpaper for Windows / Živá tapeta pro Windows
 
+[![CI](https://github.com/Jurek1357/WallMotion-PC/actions/workflows/ci.yml/badge.svg)](https://github.com/Jurek1357/WallMotion-PC/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Jurek1357/WallMotion-PC)](https://github.com/Jurek1357/WallMotion-PC/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **English** | [Čeština](#čeština)
 
 ## English
@@ -69,6 +73,13 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 - YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it, ffmpeg rides along via `imageio-ffmpeg`).
 - No Python needed if you use the ready-made `WallMotion.exe` from [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
 
+### Contributing & license
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs via
+[Issues](https://github.com/Jurek1357/WallMotion-PC/issues) and attach
+`%TEMP%\live_wallpaper_debug.log`. Released under the [MIT license](LICENSE);
+the bundled ffmpeg binary keeps its own (L)GPL license.
+
 ---
 
 ## Čeština
@@ -137,3 +148,10 @@ Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
 - Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`, ffmpeg se přibalí přes `imageio-ffmpeg`).
 - Bez Pythonu se obejdeš s hotovým `WallMotion.exe` ze záložky [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
+
+### Příspěvky a licence
+
+Příspěvky vítány — viz [CONTRIBUTING.md](CONTRIBUTING.md). Chyby hlas do
+[Issues](https://github.com/Jurek1357/WallMotion-PC/issues) a přilož
+`%TEMP%\live_wallpaper_debug.log`. Kód je pod [licencí MIT](LICENSE);
+přibalená ffmpeg binárka si nese vlastní (L)GPL licenci.

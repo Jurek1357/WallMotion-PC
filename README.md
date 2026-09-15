@@ -77,8 +77,10 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs via
 [Issues](https://github.com/Jurek1357/WallMotion-PC/issues) and attach
-`%TEMP%\live_wallpaper_debug.log`. Released under the [MIT license](LICENSE);
-the bundled ffmpeg binary keeps its own (L)GPL license.
+`%TEMP%\live_wallpaper_debug.log`. Planned work: [TODO.md](TODO.md);
+stack analysis and Linux plan: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
+Released under the [MIT license](LICENSE); the bundled ffmpeg binary keeps
+its own (L)GPL license.
 
 ---
 
@@ -153,5 +155,7 @@ Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 
 Příspěvky vítány — viz [CONTRIBUTING.md](CONTRIBUTING.md). Chyby hlas do
 [Issues](https://github.com/Jurek1357/WallMotion-PC/issues) a přilož
-`%TEMP%\live_wallpaper_debug.log`. Kód je pod [licencí MIT](LICENSE);
-přibalená ffmpeg binárka si nese vlastní (L)GPL licenci.
+`%TEMP%\live_wallpaper_debug.log`. Plán práce: [TODO.md](TODO.md);
+analýza stacku a Linux plán: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
+Kód je pod [licencí MIT](LICENSE); přibalená ffmpeg binárka si nese vlastní
+(L)GPL licenci.

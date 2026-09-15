@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QStyle,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -356,9 +357,9 @@ QComboBox QAbstractItemView {{
 STRINGS = {
     "cs": {
         "subtitle": "Nastav si obrázek nebo video jako pozadí plochy",
-        "screen_unknown": "🖥 Obrazovka: nezjištěna",
-        "screen_one": "🖥 Obrazovka: {w} × {h}",
-        "screen_multi": "🖥 Obrazovky ({n}): {parts} | primární {w} × {h}",
+        "screen_unknown": "Obrazovka: nezjištěna",
+        "screen_one": "Obrazovka: {w} × {h}",
+        "screen_multi": "Obrazovky ({n}): {parts} | primární {w} × {h}",
         "drop_hint": "Přetáhni sem obrázek nebo video\nnebo klikni pro výběr",
         "mute": "Ztlumit zvuk videa",
         "volume_label": "Hlasitost:",
@@ -407,9 +408,9 @@ STRINGS = {
     },
     "en": {
         "subtitle": "Set an image or video as your desktop background",
-        "screen_unknown": "🖥 Display: not detected",
-        "screen_one": "🖥 Display: {w} × {h}",
-        "screen_multi": "🖥 Displays ({n}): {parts} | primary {w} × {h}",
+        "screen_unknown": "Display: not detected",
+        "screen_one": "Display: {w} × {h}",
+        "screen_multi": "Displays ({n}): {parts} | primary {w} × {h}",
         "drop_hint": "Drag & drop an image or video here\nor click to browse",
         "mute": "Mute video sound",
         "volume_label": "Volume:",
@@ -1218,10 +1219,11 @@ class DropZone(QFrame):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
 
-        self.icon_label = QLabel("🖼")
+        self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
+        self.icon_label.setStyleSheet("background: transparent;")
         layout.addWidget(self.icon_label)
+        self._show_system_icon(QStyle.StandardPixmap.SP_DialogOpenButton)
 
         self.text_label = QLabel()
         self.text_label.setAlignment(Qt.AlignCenter)
@@ -1238,6 +1240,17 @@ class DropZone(QFrame):
             }}
         """)
 
+    def _show_system_icon(self, which) -> None:
+        """Systemova ikona stylu Windows misto emoji (QLabel s pixmapou)."""
+        try:
+            pm = self.style().standardIcon(which).pixmap(52, 52)
+            if not pm.isNull():
+                self.icon_label.setPixmap(pm)
+                return
+        except Exception:
+            pass
+        self.icon_label.clear()
+
     def set_hint(self, text: str):
         self._hint = text
         if not self._has_file:
@@ -1247,7 +1260,7 @@ class DropZone(QFrame):
         self.text_label.setStyleSheet(
             f"color: {T('dim')}; font-size: 12px; background: transparent;"
         )
-        self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
+        self.icon_label.setStyleSheet("background: transparent;")
         self._set_style(T("card"), ACCENT if self._has_file else T("border"))
 
     def set_file(self, path: str):
@@ -1261,10 +1274,10 @@ class DropZone(QFrame):
                     pix.scaledToHeight(70, Qt.SmoothTransformation)
                 )
             else:
-                self.icon_label.setText("🖼")
+                self._show_system_icon(QStyle.StandardPixmap.SP_FileIcon)
         else:
-            self.icon_label.setText("🎬")
-            self.icon_label.setStyleSheet("font-size: 30px; background: transparent;")
+            self._show_system_icon(QStyle.StandardPixmap.SP_MediaPlay)
+            self.icon_label.setStyleSheet("background: transparent;")
         self.text_label.setText(name)
         self._set_style(T("card"), ACCENT)
 

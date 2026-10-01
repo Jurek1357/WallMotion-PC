@@ -17,6 +17,7 @@
   "linux_no_backend": "Nepodporované prostředí ({s}). Video ani obrázek nelze nastavit.",
   "measure": "Změřit obrazovku znovu",
   "measured": "Obrazovka změřena: {w} × {h}.",
+  "mirror_failed": "Zrcadlo na monitoru {i} se nepodařilo spustit.",
   "monitor_all": "Všechny monitory",
   "monitor_label": "Monitor:",
   "monitor_primary": "primární",

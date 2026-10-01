@@ -17,6 +17,7 @@
   "linux_no_backend": "Unsupported session ({s}). Cannot set image or video.",
   "measure": "Re-measure display",
   "measured": "Display measured: {w} × {h}.",
+  "mirror_failed": "Mirror on monitor {i} failed to start.",
   "monitor_all": "All monitors",
   "monitor_label": "Monitor:",
   "monitor_primary": "primary",

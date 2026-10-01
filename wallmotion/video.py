@@ -293,6 +293,8 @@ class VideoWallpaperWindow(QWidget):
         try:
             px1, py1, px2, py2 = win32gui.GetWindowRect(progman)
             wx1, wy1, wx2, wy2 = win32gui.GetWindowRect(workerw)
+            debug_log(f"START: progman rect=({px1},{py1})-({px2},{py2}) "
+                      f"workerw rect=({wx1},{wy1})-({wx2},{wy2})")
             if self._monitor:
                 # Per-monitor video: canvas only above the selected monitor.
                 base = (px1, py1, px2, py2) if raised else (wx1, wy1, wx2, wy2)

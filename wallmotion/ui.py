@@ -1260,6 +1260,12 @@ class MainWindow(QMainWindow):
         else:
             pw, ph = self.screen_info.get("primary", (0, 0))
         debug_log(f"APPLY: path={self.selected_path} ext={ext} screen={pw}x{ph}")
+        try:
+            debug_log("APPLY: monitors=" + ", ".join(
+                f"{m.get('index')}:{m.get('x')},{m.get('y')} "
+                f"{m.get('w')}x{m.get('h')}" for m in self.monitors))
+        except Exception:
+            pass
 
         if ext in IMAGE_EXTS:
             # Windows needs a pre-fitted bitmap; every Linux renderer
@@ -1332,6 +1338,7 @@ class MainWindow(QMainWindow):
                     )
                     return
                 debug_log(f"APPLY: mirror {i} failed to start, primary runs")
+                self.status_label.setText(s["mirror_failed"].format(i=i + 1))
             if self.video_window is not None:
                 self.user_paused = False
                 self.status_label.setText(s["vid_running"].format(w=pw, h=ph))

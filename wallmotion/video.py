@@ -506,9 +506,20 @@ class VideoWallpaperWindow(QWidget):
                     debug_log(f"FRAME: downscale na {sw}x{sh} (guard)")
             self._last_proc_t = now
             if self._frames == 0:
+                try:
+                    samples = [img.pixel(10, 10),
+                               img.pixel(max(0, sw - 11), 10),
+                               img.pixel(sw // 2, sh // 2)]
+                    total = 0
+                    for px in samples:
+                        total += (px & 0xFF) + ((px >> 8) & 0xFF) + ((px >> 16) & 0xFF)
+                    bright = total // max(1, 3 * 3)
+                except Exception:
+                    bright = -1
                 debug_log(
                     f"FRAME: prvni snimek src={sw}x{sh} "
-                    f"dst={self._dw}x{self._dh} mode={self._blit_mode}"
+                    f"dst={self._dw}x{self._dh} mode={self._blit_mode} "
+                    f"bright={bright}"
                 )
             if (sw, sh) != self._frame_size:
                 # video size changed -> repaint canvas so no borders remain

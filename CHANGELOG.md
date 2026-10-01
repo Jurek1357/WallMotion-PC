@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-10-01
+
 Linux hardware-testing fallout: fixes from the first real-hardware pass
 (GNOME Wayland, Ubuntu 26.04) and self-contained AppImage renderers.
 Full report: [docs/LINUX_TESTING.md](docs/LINUX_TESTING.md).
@@ -146,7 +148,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.9...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.10...HEAD
+[1.0.10]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.10
 [1.0.9]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.9
 [1.0.8]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.8
 [1.0.7]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.7

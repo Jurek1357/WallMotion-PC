@@ -134,13 +134,19 @@ def _ensure_canvas_class() -> bool:
             ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
         ]
         _USER32.DefWindowProcW.restype = ctypes.c_void_p
-        _USER32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
-        _USER32.GetModuleHandleW.restype = ctypes.c_void_p
+        try:
+            _get_module = _USER32.GetModuleHandleW
+        except Exception:
+            # Frozen exe: user32 handle lookup can fail; kernel32
+            # always exports GetModuleHandleW.
+            _get_module = ctypes.windll.kernel32.GetModuleHandleW
+        _get_module.argtypes = [ctypes.c_wchar_p]
+        _get_module.restype = ctypes.c_void_p
         wc = _WndClassEx()
         wc.cbSize = ctypes.sizeof(_WndClassEx)
         wc.style = _CS_OWNDC
         wc.lpfnWndProc = _USER32.DefWindowProcW
-        wc.hInstance = _USER32.GetModuleHandleW(None)
+        wc.hInstance = _get_module(None)
         wc.hbrBackground = None  # do not erase background = no white flashing
         wc.lpszClassName = _CANVAS_CLASS
         _USER32.RegisterClassExW.argtypes = [ctypes.POINTER(_WndClassEx)]

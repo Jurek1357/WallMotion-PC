@@ -257,8 +257,14 @@ class VideoWallpaperWindow(QWidget):
     def _on_player_error(self, error, error_string):
         debug_log(f"PLAYER ERROR: {error} | {error_string}")
 
-    def start(self) -> bool:
-        """Creates a native canvas for video and starts playback. Returns True.
+    def start(self, after_hwnd=None) -> bool:
+        """Create the native canvas for video and start playback. Returns True.
+
+        after_hwnd: for mirror windows - insert this canvas right BELOW
+        the previous canvas instead of below DefView. Moving WorkerW
+        below every new canvas would bury the earlier canvases under
+        it (second monitor stays black) - WorkerW moves only once,
+        below the first canvas.
 
         Windows 11 "raised desktop" (Progman has WS_EX_NOREDIRECTIONBITMAP,
         DefView is WS_EX_LAYERED): the canvas must be a DIRECT child of Progman
@@ -348,19 +354,24 @@ class VideoWallpaperWindow(QWidget):
                 )
             except Exception as e:
                 debug_log(f"START: SetLayeredWindowAttributes: {e!r}")
-            # Z-order choreography: canvas BELOW icons, WorkerW BELOW canvas
+            # Z-order choreography: canvas BELOW icons, WorkerW BELOW canvas.
+            # Mirrors chain below the previous canvas; WorkerW moves only
+            # below the FIRST canvas, otherwise earlier canvases would end
+            # up buried under WorkerW (black second monitor).
             try:
-                if defview:
+                anchor = after_hwnd or defview
+                if anchor:
                     win32gui.SetWindowPos(
-                        self._canvas, defview, 0, 0, 0, 0,
+                        self._canvas, anchor, 0, 0, 0, 0,
                         win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
                         | win32con.SWP_NOACTIVATE,
                     )
-                win32gui.SetWindowPos(
-                    workerw, self._canvas, 0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
-                    | win32con.SWP_NOACTIVATE,
-                )
+                if after_hwnd is None:
+                    win32gui.SetWindowPos(
+                        workerw, self._canvas, 0, 0, 0, 0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                        | win32con.SWP_NOACTIVATE,
+                    )
                 debug_log("START: z-order nastaven (WorkerW < canvas < DefView)")
             except Exception as e:
                 debug_log(f"START: SetWindowPos z-order: {e!r}")

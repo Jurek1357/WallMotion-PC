@@ -1302,6 +1302,7 @@ class MainWindow(QMainWindow):
             targets = screens.duplicate_targets(
                 self.monitor_choice, self.monitors)
             started = 0
+            prev_hwnd = None
             for i, target in enumerate(targets):
                 window = VideoWallpaperWindow(
                     self.selected_path,
@@ -1316,8 +1317,12 @@ class MainWindow(QMainWindow):
                     self.video_window = window
                 else:
                     window.failed.connect(self._on_mirror_failed)
-                if window.start():
+                if window.start(after_hwnd=prev_hwnd):
                     started += 1
+                    try:
+                        prev_hwnd = int(window._canvas) or None
+                    except Exception:
+                        prev_hwnd = None
                     if i > 0:
                         self.mirror_windows.append(window)
                     continue

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-10-01
+
+### Fixed
+- Canvas window class registration falls back to kernel32 when the
+  user32 lookup fails in the frozen build (was logging an error and
+  using the plain STATIC class).
+
 ## [1.0.10] - 2026-10-01
 
 Linux hardware-testing fallout: fixes from the first real-hardware pass
@@ -148,7 +155,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.10...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.11...HEAD
+[1.0.11]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.11
 [1.0.10]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.10
 [1.0.9]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.9
 [1.0.8]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.8

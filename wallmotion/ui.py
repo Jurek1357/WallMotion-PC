@@ -70,7 +70,13 @@ from wallmotion.updatecheck import (
     is_newer,
     should_auto_check,
 )
-from wallmotion.utils import DEBUG_LOG, _asset_path, _quiet_ffmpeg, debug_log
+from wallmotion.utils import (
+    DEBUG_LOG,
+    _asset_path,
+    _quiet_ffmpeg,
+    app_version,
+    debug_log,
+)
 from wallmotion.video import VideoWallpaperWindow
 from wallmotion.wallpaper import (
     IMAGE_EXTS,
@@ -959,10 +965,8 @@ class MainWindow(QMainWindow):
                 s["linux_no_backend"].format(s=describe_session()))
             return
         if getattr(backend, "name", "") == "gnome":
-            QMessageBox.warning(
-                self, s["linux_gnome_video_t"], s["linux_gnome_video_m"])
-            self.status_label.setText(s["linux_gnome_video_m"])
-            return
+            if not self._ensure_hanabi(s):
+                return
         self.video_window = LinuxVideoWallpaper(
             backend, self.selected_path, muted=self.mute_checkbox.isChecked(),
             volume=self.volume_slider.value() / 100.0,
@@ -993,6 +997,52 @@ class MainWindow(QMainWindow):
                 self, s["vid_fail_t"],
                 s["linux_missing"].format(tools=tools),
             )
+
+    def _ensure_hanabi(self, s) -> bool:
+        """GNOME video needs the Hanabi extension. Install/enable it via
+        GNOME's own mechanisms; returns True when usable right now."""
+        from wallmotion.platform.linux import hanabi_enable, hanabi_install, hanabi_state
+        state = hanabi_state()
+        if state == "missing":
+            answer = QMessageBox.question(
+                self, s["linux_hanabi_install_t"], s["linux_gnome_video_m"])
+            if answer != QMessageBox.StandardButton.Yes:
+                self.status_label.setText(s["linux_gnome_video_t"])
+                return False
+            ok, res = hanabi_install()
+            state = hanabi_state()
+            if state == "missing":
+                self.status_label.setText(
+                    s["linux_hanabi_failed_m"].format(err=res.strip() or "?"))
+                return False
+        if state == "queued":
+            # installed but never loaded by the shell - enable queues
+            # it in enabled-extensions; it activates on next login.
+            answer = QMessageBox.question(
+                self, s["linux_hanabi_enable_t"], s["linux_hanabi_enable_m"])
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+            hanabi_enable()
+            QMessageBox.information(
+                self, s["linux_gnome_video_t"], s["linux_hanabi_relogin_m"])
+            self.status_label.setText(s["linux_hanabi_relogin_m"])
+            return False
+        if state == "installed":
+            # the shell knows the extension - enabling works live.
+            # set_video writes video-path BEFORE enabling so Hanabi's
+            # renderer launches into playback (an empty path makes it
+            # pop its preferences window).
+            answer = QMessageBox.question(
+                self, s["linux_hanabi_enable_t"], s["linux_hanabi_enable_m"])
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+            return True
+        if state != "enabled":
+            QMessageBox.information(
+                self, s["linux_gnome_video_t"], s["linux_hanabi_relogin_m"])
+            self.status_label.setText(s["linux_hanabi_relogin_m"])
+            return False
+        return True
 
     def _rotation_interval_seconds(self) -> int:
         try:
@@ -1212,10 +1262,15 @@ class MainWindow(QMainWindow):
         debug_log(f"APPLY: path={self.selected_path} ext={ext} screen={pw}x{ph}")
 
         if ext in IMAGE_EXTS:
-            fitted = fit_image_to_screen(self.selected_path, pw, ph)
+            # Windows needs a pre-fitted bitmap; every Linux renderer
+            # scales itself (feh --bg-fill, swww --resize crop, GNOME
+            # 'zoom'), so on Linux pass the original file - fitting would
+            # only duplicate work and leave a volatile BMP in /tmp.
             if self._is_windows:
+                fitted = fit_image_to_screen(self.selected_path, pw, ph)
                 set_static_wallpaper(fitted)
             else:
+                fitted = self.selected_path
                 from wallmotion.platform.linux import describe_session
                 backend = self._refresh_linux_backend()
                 if backend is None:
@@ -1374,8 +1429,9 @@ class MainWindow(QMainWindow):
             try:
                 if self._linux_backend is not None:
                     self._linux_backend.stop()
-            except Exception:
-                pass
+                    self._linux_backend.restore()
+            except Exception as e:
+                debug_log(f"RESTORE: backend restore error: {e!r}")
         self.status_label.setText(self.S()["restored"])
         self._refresh_pause_ui()
 
@@ -1533,12 +1589,6 @@ def main():
         ensure_dirs()
     except Exception:
         pass
-    try:
-        with open(DEBUG_LOG, "w", encoding="utf-8") as f:
-            f.write("=== Live Wallpaper start ===\n")
-    except Exception:
-        pass
-    debug_log("APP start")
     # CLI: parse before QApplication (it would eat its own flags).
     cli_args, startup_cmd = None, {}
     try:
@@ -1548,7 +1598,7 @@ def main():
     except Exception:
         cli_args = None
     if cli_args is not None and getattr(cli_args, "version", False):
-        print("WallMotion dev (version follows git tags, see Releases)")
+        print(f"WallMotion {app_version()}")
         return
     if cli_args is not None:
         try:
@@ -1557,11 +1607,20 @@ def main():
             startup_cmd = {}
     if startup_cmd:
         # Another instance running? Forward the command and exit.
+        # NOTE: the log is truncated only below, when THIS process
+        # becomes the app - a forwarder must not wipe the running
+        # instance's debug history (it's the file bug reports attach).
         try:
             if instance.send_command(startup_cmd):
                 return
         except Exception:
             pass
+    try:
+        with open(DEBUG_LOG, "w", encoding="utf-8") as f:
+            f.write("=== Live Wallpaper start ===\n")
+    except Exception:
+        pass
+    debug_log("APP start")
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setStyleSheet(build_stylesheet("dark"))

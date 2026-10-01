@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Linux hardware-testing fallout: fixes from the first real-hardware pass
+(GNOME Wayland, Ubuntu 26.04) and self-contained AppImage renderers.
+Full report: [docs/LINUX_TESTING.md](docs/LINUX_TESTING.md).
+
+### Added
+- The AppImage now bundles `feh`, `mpv`, `xwinwrap`, `mpvpaper`,
+  `swww` and `swww-daemon` built from pinned sources; no manual
+  renderer installs needed. Renderer lookup order: bundled dir,
+  `~/.local/share/wallmotion/bin`, then `$PATH`.
+- `stop` restores the previous Linux wallpaper (GNOME `gsettings`
+  snapshot, X11 `~/.fehbg` snapshot, wlroots `swww query` snapshot).
+- Fullscreen auto-pause probe on X11 (`xprop`/`xwininfo`/`xrandr`).
+- GNOME Wayland video wallpaper via the Hanabi extension: the app
+  offers to install the upstream-built zip bundled in `assets/`
+  (GPL-3.0, license text shipped alongside), queues it in
+  `enabled-extensions`, and drives its `video-path`/`mute`/`volume`
+  keys — stop/pause disable the extension to actually halt the
+  renderer (clearing `video-path` alone leaves it playing). First
+  activation needs one sign-out/in (GNOME Wayland cannot load a new
+  extension into the running session).
+- `assets/VERSION` version file written by CI; `--version` reports the
+  release tag instead of a static dev string.
+
+### Fixed
+- Session-integrated tools (`gsettings`, `plasma-apply-wallpaperimage`,
+  X11 autopause probes) are resolved against `/usr/bin`, `/bin`,
+  `/usr/local/bin` before `$PATH`: a Linuxbrew/Conda shadow binary can
+  use a different settings backend (keyfile), so wallpaper writes
+  silently never reached GNOME's dconf store.
+- `debug.log` is no longer truncated by every CLI invocation; it
+  accumulates across forwarded commands.
+- A stale `wallmotion-mpv.sock` left behind by a killed player no
+  longer dead-ends the next video's IPC channel; it is unlinked before
+  the new spawn.
+- Muted video start on Linux used `no-audio`, permanently dropping the
+  audio stream; now uses `mute=yes` so IPC unmute works.
+- Static images on Linux were re-encoded to a BMP in `/tmp`; the source
+  file is applied directly (all Linux renderers scale natively).
+- `_quiet_ffmpeg` now handles Linux `libavutil.so.N` library names.
+
 ## [1.0.9] - 2026-10-01
 
 ### Added

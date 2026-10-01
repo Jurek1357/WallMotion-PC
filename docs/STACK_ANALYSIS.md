@@ -145,7 +145,7 @@ desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()   # "kde", "gnome", 
 | `mpv` | Decode engine for all video paths | every distro repo | via xwinwrap's `-wid` |
 | `mpvpaper` | Video wallpaper on wlroots layer-shell | AUR / most repos / cargo-build | `mpvpaper -o "loop no-audio" '*' file.mp4` (`*` = all outputs; or an output name like `DP-1`) |
 | `swww` | Static image on wlroots | repos / `cargo install swww` | needs `swww-daemon` running; then `swww img --resize crop file.png` |
-| `xwinwrap` | Sticky desktop-level window on X11 | build from source (mmhobi7 fork) | `xwinwrap -g 1920x1080+0+0 -ov -fdt -- mpv -wid WID --loop=inf --no-audio file.mp4` (`WID` is the literal placeholder xwinwrap substitutes) |
+| `xwinwrap` | Sticky desktop-level window on X11 | build from source (r00tdaemon fork) | `xwinwrap -g 1920x1080+0+0 -b -ni -nf -ov -fdt -- mpv -wid WID --loop=inf --no-audio file.mp4` (`WID` is the literal placeholder xwinwrap substitutes) |
 | `feh` | Static image on X11 | every distro repo | `feh --bg-fill file.png` |
 | `gsettings` | GNOME image wallpaper | preinstalled | `gsettings set org.gnome.desktop.background picture-uri file:///abs/path` (also set `picture-uri-dark`) |
 | `plasma-apply-wallpaperimage` | KDE image wallpaper | preinstalled on Plasma | `plasma-apply-wallpaperimage /abs/path.png` |

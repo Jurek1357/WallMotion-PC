@@ -74,19 +74,27 @@ detected from `$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
 |---|---|---|
 | X11 | `feh --bg-fill` | `xwinwrap` + `mpv` fullscreen |
 | Wayland + KDE / sway / Hyprland / wlroots | `plasma-apply-wallpaperimage` / `swww` | `mpvpaper` (all outputs) |
-| Wayland + GNOME | `gsettings` | not supported (needs the Hanabi Shell extension) |
+| Wayland + GNOME | `gsettings` | via the Hanabi extension — the app offers to install it (bundled zip); it activates after sign-out/sign-in |
 
-Install what your session needs, e.g. `sudo apt install feh mpv`
-(X11), or `mpvpaper` / `swww` from your distro repos. The AppImage
-needs host Mesa/GL libraries (`libgl1 libegl1` — preinstalled on
-practically every desktop distro). Missing tools
-are reported in the status line instead of crashing. Volume, mute and
-pause go through mpv JSON IPC; battery auto-pause reads
-`/sys/class/power_supply`.
+The AppImage bundles `feh`, `mpv`, `xwinwrap`, `mpvpaper`, `swww` and
+`swww-daemon` — no manual installs on any supported session. The only
+tools taken from the system are the desktop's own (`gsettings`,
+`plasma-apply-wallpaperimage`). Host Mesa/GL is still needed
+(`libgl1 libegl1` — preinstalled on practically every desktop distro).
+Running from source instead? Install the renderers via your package
+manager or drop them into `~/.local/share/wallmotion/bin` — bundled
+and drop-in tools are always preferred over `$PATH`.
 
-Status: implemented but not yet tested on real hardware — see
-[TODO.md](TODO.md). Reports welcome (attach
-`~/.local/state/wallmotion/debug.log`).
+Volume, mute and pause go through mpv JSON IPC; battery auto-pause
+reads `/sys/class/power_supply`; fullscreen auto-pause probes the
+active window on X11 via `xprop`/`xwininfo`/`xrandr` (Wayland has no
+compositor-neutral equivalent — the rule is a no-op there). Stop
+restores the previous wallpaper on GNOME (`gsettings`), X11
+(`~/.fehbg`) and wlroots (`swww query`).
+
+Status: verified on GNOME Wayland (Ubuntu 26.04) — see
+[docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Reports for the other
+sessions welcome (attach `~/.local/state/wallmotion/debug.log`).
 
 ### Known limitations
 
@@ -104,7 +112,8 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs vi
 `%TEMP%\live_wallpaper_debug.log`. Planned work: [TODO.md](TODO.md);
 stack analysis and Linux plan: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Released under the [MIT license](LICENSE); the bundled ffmpeg binary keeps
-its own (L)GPL license.
+its own (L)GPL license, and the bundled Hanabi GNOME Shell extension stays
+GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).
 
 ---
 
@@ -176,16 +185,26 @@ detekované z `$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
 |---|---|---|
 | X11 | `feh --bg-fill` | `xwinwrap` + `mpv` fullscreen |
 | Wayland + KDE / sway / Hyprland / wlroots | `plasma-apply-wallpaperimage` / `swww` | `mpvpaper` (všechny výstupy) |
-| Wayland + GNOME | `gsettings` | nepodporováno (chce to rozšíření Hanabi) |
+| Wayland + GNOME | `gsettings` | přes rozšíření Hanabi — aplikace nabídne instalaci (přibalený zip); aktivuje se po odhlášení a přihlášení |
 
-Nainstaluj, co tvoje session potřebuje, např. `sudo apt install feh mpv`
-(X11), nebo `mpvpaper` / `swww` z repositářů distra. Chybějící nástroje
-appka nahlásí ve stavovém řádku, nespadne. Hlasitost, ztlumení a pauza
-jdou přes mpv JSON IPC; pauza na baterii čte `/sys/class/power_supply`.
+AppImage má v sobě `feh`, `mpv`, `xwinwrap`, `mpvpaper`, `swww` a
+`swww-daemon` — žádné ruční instalace na žádné podporované session.
+Ze systému se berou jen nástroje samotného desktopu (`gsettings`,
+`plasma-apply-wallpaperimage`). Pořád je potřeba host Mesa/GL
+(`libgl1 libegl1` — předinstalované prakticky všude). Při běhu ze
+zdrojáku nástroje nainstaluj přes balíčkovací systém, nebo je hoď do
+`~/.local/share/wallmotion/bin` — přibalené a doplňkové nástroje mají
+přednost před `$PATH`.
 
-Stav: naimplementováno, ale neotestováno na reálném hardwaru — viz
-[TODO.md](TODO.md). Hlas chyby s logem
-`~/.local/state/wallmotion/debug.log`.
+Hlasitost, ztlumení a pauza jdou přes mpv JSON IPC; pauza na baterii
+čte `/sys/class/power_supply`; pauza na fullscreen na X11 zjišťuje
+aktivní okno přes `xprop`/`xwininfo`/`xrandr` (Wayland nemá obdobný
+protokol — tam je pravidlo no-op). Stop vrátí předchozí tapetu na
+GNOME (`gsettings`), X11 (`~/.fehbg`) a wlroots (`swww query`).
+
+Stav: ověřeno na GNOME Wayland (Ubuntu 26.04) — viz
+[docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Hlášení z ostatních
+session vítána (přilož `~/.local/state/wallmotion/debug.log`).
 
 ### Známá omezení
 
@@ -203,4 +222,5 @@ Příspěvky vítány — viz [CONTRIBUTING.md](CONTRIBUTING.md). Chyby hlas do
 `%TEMP%\live_wallpaper_debug.log`. Plán práce: [TODO.md](TODO.md);
 analýza stacku a Linux plán: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Kód je pod [licencí MIT](LICENSE); přibalená ffmpeg binárka si nese vlastní
-(L)GPL licenci.
+(L)GPL licenci a přibalené rozšíření Hanabi pro GNOME Shell zůstává pod
+GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).

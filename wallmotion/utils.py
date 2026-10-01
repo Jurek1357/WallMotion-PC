@@ -30,6 +30,23 @@ def debug_log(msg: str) -> None:
         pass
 
 
+def app_version() -> str:
+    """Release tag (e.g. 'v1.0.6') or 'dev'.
+
+    CI writes the git tag into assets/VERSION before packaging, so
+    frozen builds know their own version; a source checkout without
+    the file falls back to 'dev'.
+    """
+    try:
+        with open(_asset_path("VERSION"), encoding="utf-8") as f:
+            tag = f.read().strip()
+        if tag:
+            return tag
+    except Exception:
+        pass
+    return "dev"
+
+
 def _asset_path(name: str) -> str:
     """Path to a file in assets/ (also works in frozen EXE via _MEIPASS)."""
     try:
@@ -52,7 +69,13 @@ def _quiet_ffmpeg(level: int = 8) -> bool:
     also applies to playback. Level 8 = FATAL (silent, decoder errors stay
     hidden - OK for a wallpaper app).
     """
-    names = ["avutil-59.dll", "avutil-60.dll", "avutil-58.dll", "avutil-57.dll"]
+    versions = ("59", "60", "58", "57")
+    if sys.platform == "win32":
+        names = [f"avutil-{v}.dll" for v in versions]
+    elif sys.platform == "darwin":
+        names = [f"libavutil.{v}.dylib" for v in versions]
+    else:
+        names = [f"libavutil.so.{v}" for v in versions]
     candidates = []
     try:
         import PySide6 as _pyside

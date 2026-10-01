@@ -2,13 +2,16 @@
 
 Same idea as Lively: a fullscreen game should get the GPU back, and a
 laptop on battery should not waste power on an invisible wallpaper.
-Sensors are Windows-only (guarded imports, like wallmotion.win32);
-the decision logic is pure and unit-tested.
+Sensors: WinAPI on Windows; on Linux, sysfs battery plus an X11-only
+fullscreen probe (xprop/xwininfo/xrandr) - Wayland exposes no
+compositor-neutral "focused window geometry" protocol, so there the
+rule is a documented no-op. Decision logic is pure and unit-tested.
 """
 
 from __future__ import annotations
 
 import ctypes
+import re
 import sys
 
 if sys.platform == "win32":
@@ -106,8 +109,94 @@ def monitor_rect_for_window(hwnd) -> tuple | None:
         return None
 
 
+def parse_xprop_active_window(output: str) -> int | None:
+    """Window id from `xprop -root _NET_ACTIVE_WINDOW`. Pure, tested.
+
+    Output: `_NET_ACTIVE_WINDOW(WINDOW): window id # 0x3e00007`
+    """
+    try:
+        m = re.search(r"#\s*(0x[0-9a-fA-F]+|\d+)", output or "")
+        return int(m.group(1), 0) if m else None
+    except Exception:
+        return None
+
+
+def parse_xwininfo_geometry(output: str) -> tuple | None:
+    """(left, top, right, bottom) from `xwininfo -id ... -stats`. Pure."""
+    try:
+        def field(name: str) -> int:
+            return int(re.search(rf"{name}:\s*(-?\d+)", output).group(1))
+
+        x = field(r"Absolute upper-left X")
+        y = field(r"Absolute upper-left Y")
+        w = field("Width")
+        h = field("Height")
+        if w <= 0 or h <= 0:
+            return None
+        return (x, y, x + w, y + h)
+    except Exception:
+        return None
+
+
+def parse_xrandr_monitors(output: str) -> list:
+    """[(left, top, right, bottom)] from `xrandr --listmonitors`. Pure.
+
+    Lines: ` 0: +*eDP-1 1920/344x1080/194+0+0  eDP-1`
+    (pixel size, then physical mm, then +x+y offsets).
+    """
+    monitors = []
+    try:
+        for m in re.finditer(
+                r"^\s*\d+:.*?(\d+)/\d+x(\d+)/\d+([+-]\d+)([+-]\d+)",
+                output or "", re.MULTILINE):
+            w, h, x, y = (int(m.group(i)) for i in range(1, 5))
+            if w > 0 and h > 0:
+                monitors.append((x, y, x + w, y + h))
+    except Exception:
+        pass
+    return monitors
+
+
+def is_fullscreen_app_active_x11() -> bool:
+    """X11 sensor: does _NET_ACTIVE_WINDOW exactly cover a monitor?
+
+    Uses xprop/xwininfo/xrandr (x11-utils, near-universal on X11).
+    Wayland deliberately reports False - there is no compositor-neutral
+    protocol to read the focused window's geometry.
+    """
+    try:
+        from wallmotion.platform.linux import detect_session, run_command, session_tool
+        if detect_session().get("session") != "x11":
+            return False
+        tools = {t: session_tool(t) for t in ("xprop", "xwininfo", "xrandr")}
+        if not all(tools.values()):
+            return False
+        ok, out, _ = run_command(
+            [tools["xprop"], "-root", "_NET_ACTIVE_WINDOW"])
+        if not ok:
+            return False
+        wid = parse_xprop_active_window(out)
+        if not wid:
+            return False
+        ok, out, _ = run_command(
+            [tools["xwininfo"], "-id", hex(wid), "-stats"])
+        if not ok:
+            return False
+        rect = parse_xwininfo_geometry(out)
+        if not rect:
+            return False
+        ok, out, _ = run_command([tools["xrandr"], "--listmonitors"])
+        if not ok:
+            return False
+        return any(rect == mon for mon in parse_xrandr_monitors(out))
+    except Exception:
+        return False
+
+
 def is_fullscreen_app_active() -> bool:
     """True when the foreground window covers its whole monitor."""
+    if sys.platform.startswith("linux"):
+        return is_fullscreen_app_active_x11()
     try:
         info = foreground_window_info()
         if not info:

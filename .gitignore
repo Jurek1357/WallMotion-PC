@@ -9,3 +9,11 @@ downloads/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+assets/VERSION
+
+# Local AppImage build artifacts (CI produces its own)
+*.AppImage
+AppDir/
+WallMotion.spec
+WallMotion.desktop
+wallmotion.png

@@ -3,6 +3,9 @@
 from wallmotion.autopause import (
     is_fullscreen_rect,
     parse_ac_line_status,
+    parse_xprop_active_window,
+    parse_xrandr_monitors,
+    parse_xwininfo_geometry,
     should_pause,
 )
 
@@ -53,6 +56,46 @@ class TestFullscreenRect:
         assert is_fullscreen_rect(
             (1920, 0, 3840, 1080), (1920, 0, 3840, 1080)
         )
+
+
+class TestX11FullscreenParsers:
+    XPROP = "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x3e00007\n"
+    XWININFO = """xwininfo: Window id: 0x3e00007 "mpv"
+
+  Absolute upper-left X:  1920
+  Absolute upper-left Y:  0
+  Relative upper-left X:  0
+  Relative upper-left Y:  0
+  Width: 1920
+  Height: 1080
+  Depth: 24
+"""
+    XRANDR = """Monitors: 2
+ 0: +*eDP-1 1920/344x1200/215+0+0  eDP-1
+ 1: +HDMI-1 1920/510x1080/290+1920+0  HDMI-1
+"""
+
+    def test_active_window_id(self):
+        assert parse_xprop_active_window(self.XPROP) == 0x3E00007
+
+    def test_active_window_none(self):
+        assert parse_xprop_active_window(
+            "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x0\n") == 0
+        assert parse_xprop_active_window("") is None
+
+    def test_xwininfo_rect(self):
+        assert parse_xwininfo_geometry(self.XWININFO) == (1920, 0, 3840, 1080)
+
+    def test_xwininfo_garbage(self):
+        assert parse_xwininfo_geometry("not xwininfo") is None
+
+    def test_xrandr_monitors(self):
+        mons = parse_xrandr_monitors(self.XRANDR)
+        assert mons == [(0, 0, 1920, 1200), (1920, 0, 3840, 1080)]
+
+    def test_fullscreen_match_via_parsers(self):
+        rect = parse_xwininfo_geometry(self.XWININFO)
+        assert any(rect == m for m in parse_xrandr_monitors(self.XRANDR))
 
 
 class TestAcLineStatus:

@@ -18,7 +18,8 @@ def main():
         except SystemExit as e:
             sys.exit(e.code)  # --help already printed
         if getattr(args, "version", False):
-            print("WallMotion dev (version follows git tags, see Releases)")
+            from wallmotion.utils import app_version
+            print(f"WallMotion {app_version()}")
             return
     from wallmotion.ui import main as ui_main
     ui_main()

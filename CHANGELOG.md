@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.15] - 2026-10-02
+
+### Added
+- In-app library v2: Wallpaper-Engine-style two panes (thumbnail
+  grid, live preview, search filter), native dialog instead of the
+  browser.
+
 ## [1.0.14] - 2026-10-02
 
 ### Added
@@ -172,7 +179,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.14...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.15...HEAD
+[1.0.15]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.15
 [1.0.14]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.14
 [1.0.13]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.13
 [1.0.12]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.12

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-10-02
+
 ### Changed
 - Library is a tab in the main window (settings | library, grid +
   live preview + search) instead of a separate dialog; tray action
@@ -190,7 +192,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.16...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.17...HEAD
+[1.0.17]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.17
 [1.0.16]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.16
 [1.0.15]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.15
 [1.0.14]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.14

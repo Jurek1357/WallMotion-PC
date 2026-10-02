@@ -56,20 +56,21 @@ class PinSlider(QSlider):
                     HANDLE_W // 2, groove_y - GROOVE_H // 2,
                     cx - HANDLE_W // 2, GROOVE_H, 3, 3)
 
-            # Handle: rounded rectangle with a triangle tip below.
+            # Handle: rounded rectangle with a narrow triangle tip below.
             top = groove_y - HANDLE_TIP_H - HANDLE_RECT_H
             left = cx - HANDLE_W // 2
             painter.setBrush(QColor(ACCENT))
             painter.drawRoundedRect(left, top, HANDLE_W, HANDLE_RECT_H, 5, 5)
             tip = QPainterPath()
-            tip.moveTo(left + 2, top + HANDLE_RECT_H - 1)
-            tip.lineTo(left + HANDLE_W - 2, top + HANDLE_RECT_H - 1)
+            tip.moveTo(left + 3, top + HANDLE_RECT_H - 2)
+            tip.lineTo(left + HANDLE_W - 3, top + HANDLE_RECT_H - 2)
             tip.lineTo(cx, top + HANDLE_RECT_H + HANDLE_TIP_H)
             tip.closeSubpath()
             painter.fillPath(tip, QColor(ACCENT))
-            # Small light dot in the rectangle.
+            # Small light dot centered in the rectangle.
+            dot_top = top + (HANDLE_RECT_H - 4) // 2
             painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(cx - 2, top + 6, 4, 4)
+            painter.drawEllipse(cx - 2, dot_top, 4, 4)
             painter.end()
         except Exception:
             try:

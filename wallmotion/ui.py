@@ -43,7 +43,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSlider,
     QStyle,
     QSystemTrayIcon,
     QTabWidget,
@@ -65,6 +64,7 @@ from wallmotion.i18n import (
 from wallmotion.linux_video import LinuxVideoWallpaper
 from wallmotion.platform import get_backend
 from wallmotion.rotation import INTERVALS, RotationQueue, format_interval
+from wallmotion.slider import PinSlider
 from wallmotion.updatecheck import (
     UpdateCheckWorker,
     is_newer,
@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
         vol_row.setSpacing(8)
         self.volume_label = QLabel()
         vol_row.addWidget(self.volume_label)
-        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider = PinSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(30)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)

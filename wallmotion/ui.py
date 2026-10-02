@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Live Wallpaper")
         self.setMinimumSize(430, 620)
-        self.resize(430, 760)
+        self.resize(430, 800)
 
         self.video_window = None
         self.mirror_windows = []  # duplicate playback on other monitors
@@ -314,6 +314,11 @@ class MainWindow(QMainWindow):
         self.folder_button.setObjectName("secondary")
         self.folder_button.clicked.connect(self.open_downloads_folder)
         layout.addWidget(self.folder_button)
+
+        self.library_button = QPushButton()
+        self.library_button.setObjectName("secondary")
+        self.library_button.clicked.connect(self.open_library)
+        layout.addWidget(self.library_button)
 
         self.mute_checkbox = QCheckBox()
         self.mute_checkbox.setChecked(True)
@@ -781,6 +786,7 @@ class MainWindow(QMainWindow):
         self.yt_input.setPlaceholderText(s["yt_placeholder"])
         self.yt_button.setText(s["yt_button"])
         self.folder_button.setText(s["open_folder"])
+        self.library_button.setText(s["tray_library"])
         if not self.status_label.text():
             self.status_label.setText(s["ready"])
         try:

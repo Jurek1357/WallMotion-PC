@@ -24,6 +24,17 @@ DEFAULT_PORT = 8765
 THUMB_SECONDS = 1
 
 
+def format_size(size: int) -> str:
+    """'2.0 MB' style label. Pure, unit-tested."""
+    try:
+        size = int(size)
+    except Exception:
+        return ""
+    if size >= 1048576:
+        return f"{size / 1048576:.1f} MB"
+    return f"{max(1, size // 1024)} KB"
+
+
 def media_dir() -> str:
     try:
         return str(app_dirs()["downloads"])

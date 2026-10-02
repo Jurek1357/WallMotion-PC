@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from wallmotion.webui import ensure_thumbnail, list_media
+from wallmotion.webui import ensure_thumbnail, format_size, list_media
 
 THUMB_W = 200
 THUMB_H = 130
@@ -61,17 +61,6 @@ def preview_pixmap(kind: str, path: str, thumbs_dir: str | None = None,
     except Exception:
         pass
     return placeholder_pixmap(w, h)
-
-
-def format_size(size: int) -> str:
-    """'2 MB' style label for the preview pane. Pure, unit-tested."""
-    try:
-        size = int(size)
-    except Exception:
-        return ""
-    if size >= 1048576:
-        return f"{size / 1048576:.1f} MB"
-    return f"{max(1, size // 1024)} KB"
 
 
 class LibraryDialog(QDialog):

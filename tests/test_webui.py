@@ -7,10 +7,22 @@ import urllib.request
 
 from wallmotion.webui import (
     WebLibraryServer,
+    format_size,
     list_media,
     safe_name,
     thumbnail_command,
 )
+
+
+class TestFormatSize:
+    def test_mb(self):
+        assert format_size(2097152) == "2.0 MB"
+
+    def test_kb(self):
+        assert format_size(2048) == "2 KB"
+
+    def test_garbage(self):
+        assert format_size("x") == ""
 
 
 class TestListMedia:

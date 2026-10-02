@@ -4,6 +4,12 @@ import pytest
 
 try:
     from PySide6 import QtGui, QtWidgets
+
+    from wallmotion.library import (
+        LibraryDialog,
+        placeholder_pixmap,
+        preview_pixmap,
+    )
     _HAVE_QT = True
 except Exception:
     QtGui = None
@@ -11,13 +17,6 @@ except Exception:
     _HAVE_QT = False
 
 pytestmark = pytest.mark.skipif(not _HAVE_QT, reason="Qt unavailable")
-
-from wallmotion.library import (  # noqa: E402 (needs QtWidgets first)
-    LibraryDialog,
-    format_size,
-    placeholder_pixmap,
-    preview_pixmap,
-)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -117,17 +116,6 @@ class TestSearchAndPreview:
             assert "·" in dlg.meta_label.text()
         finally:
             dlg.deleteLater()
-
-
-class TestFormatSize:
-    def test_mb(self):
-        assert format_size(2097152) == "2.0 MB"
-
-    def test_kb(self):
-        assert format_size(2048) == "2 KB"
-
-    def test_garbage(self):
-        assert format_size("x") == ""
 
 
 class TestPreviews:

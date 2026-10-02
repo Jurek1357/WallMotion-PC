@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-10-02
+
+### Changed
+- Volume slider handle is a painted pin (rectangle + triangle tip)
+  instead of the default look.
+
 ## [1.0.18] - 2026-10-02
 
 ### Changed
@@ -198,7 +204,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.18...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.19...HEAD
+[1.0.19]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.19
 [1.0.18]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.18
 [1.0.17]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.17
 [1.0.16]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.16

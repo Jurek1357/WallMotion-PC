@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-10-02
+
+### Changed
+- Smaller, more compact buttons (padding, font, corners) and toggle
+  buttons; initial window 700×800.
+
 ## [1.0.17] - 2026-10-02
 
 ### Changed
@@ -192,7 +198,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.17...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.18...HEAD
+[1.0.18]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.18
 [1.0.17]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.17
 [1.0.16]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.16
 [1.0.15]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.15

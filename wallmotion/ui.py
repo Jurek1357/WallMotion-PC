@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QStyle,
     QSystemTrayIcon,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -201,8 +202,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Live Wallpaper")
-        self.setMinimumSize(430, 620)
-        self.resize(430, 800)
+        self.setMinimumSize(560, 620)
+        self.resize(700, 800)
 
         self.video_window = None
         self.mirror_windows = []  # duplicate playback on other monitors
@@ -415,13 +416,22 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
+        # Tabs: settings + wallpaper library (Wallpaper-Engine style).
+        from wallmotion.library import LibraryPanel
+        from wallmotion.webui import media_dir, thumbs_dir
+        self.library_panel = LibraryPanel(self.S(), media_dir(), thumbs_dir())
+        self.library_panel.file_chosen.connect(self._on_library_apply)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(content, "")
+        self.tabs.addTab(self.library_panel, "")
+
         # Scrollable content: the window is resizable and nothing ever
         # overlaps or gets cut off, whatever the font scaling is.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
+        scroll.setWidget(self.tabs)
         self.setCentralWidget(scroll)
 
         self._init_tray()
@@ -755,6 +765,12 @@ class MainWindow(QMainWindow):
     def retranslate(self):
         s = self.S()
         self.subtitle_label.setText(s["subtitle"])
+        self.tabs.setTabText(0, s["settings_title"])
+        self.tabs.setTabText(1, s["library_title"])
+        try:
+            self.library_panel.retranslate(s)
+        except Exception:
+            pass
         # Toggle buttons show the *target*: EN while Czech is on, sun
         # while dark mode is on (click switches to the other one).
         try:
@@ -1577,13 +1593,15 @@ class MainWindow(QMainWindow):
             debug_log(f"WEB apply exception: {e!r}")
 
     def open_library(self):
-        """Open the wallpaper library dialog (native grid with previews)."""
+        """Show the library tab (refresh first so it is always current)."""
         try:
-            from wallmotion.library import LibraryDialog
-            from wallmotion.webui import media_dir, thumbs_dir
-            dialog = LibraryDialog(self.S(), media_dir(), thumbs_dir(), self)
-            dialog.file_chosen.connect(self._on_library_apply)
-            dialog.exec()
+            self.showNormal()
+            self.raise_()
+            try:
+                self.library_panel.refresh()
+            except Exception:
+                pass
+            self.tabs.setCurrentIndex(1)
         except Exception as e:
             debug_log(f"LIB open exception: {e!r}")
 

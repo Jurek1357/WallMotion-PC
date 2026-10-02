@@ -44,6 +44,7 @@
   "screen_multi": "Displays ({n}): {parts} | primary {w} × {h}",
   "screen_one": "Display: {w} × {h}",
   "screen_unknown": "Display: not detected",
+  "settings_title": "Settings",
   "stop": "Stop / restore original",
   "subtitle": "Set an image or video as your desktop background",
   "theme_dark": "Dark",

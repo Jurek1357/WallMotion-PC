@@ -44,8 +44,8 @@ class TestLibraryDialog:
         (tmp_path / "c.txt").write_bytes(b"z")
         dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
         try:
-            assert dlg.grid.count() == 2
-            assert dlg.info_label.text() == "In library: 2"
+            assert dlg.panel.grid.count() == 2
+            assert dlg.panel.info_label.text() == "In library: 2"
             assert dlg.windowTitle() == "Library"
         finally:
             dlg.deleteLater()
@@ -53,8 +53,8 @@ class TestLibraryDialog:
     def test_empty(self, tmp_path):
         dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
         try:
-            assert dlg.grid.count() == 0
-            assert dlg.info_label.text() == "Empty"
+            assert dlg.panel.grid.count() == 0
+            assert dlg.panel.info_label.text() == "Empty"
         finally:
             dlg.deleteLater()
 
@@ -64,8 +64,8 @@ class TestLibraryDialog:
         try:
             received = []
             dlg.file_chosen.connect(received.append)
-            dlg.grid.setCurrentRow(0)
-            dlg._apply_current()
+            dlg.panel.grid.setCurrentRow(0)
+            dlg.panel._apply_current()
             assert len(received) == 1 and received[0].endswith("b.jpg")
             assert dlg.result() == LibraryDialog.DialogCode.Accepted
         finally:
@@ -77,9 +77,9 @@ class TestLibraryDialog:
         try:
             received = []
             dlg.file_chosen.connect(received.append)
-            dlg.grid.setCurrentRow(-1)
-            dlg.grid.clearSelection()
-            dlg._apply_current()
+            dlg.panel.grid.setCurrentRow(-1)
+            dlg.panel.grid.clearSelection()
+            dlg.panel._apply_current()
             assert received == []
         finally:
             dlg.deleteLater()
@@ -95,14 +95,14 @@ class TestSearchAndPreview:
     def test_filter(self, tmp_path):
         dlg = self._dlg(tmp_path)
         try:
-            assert dlg.grid.count() == 3
-            dlg.search_input.setText("alpha")
-            visible = [dlg.grid.item(i).text() for i in range(3)
-                       if not dlg.grid.item(i).isHidden()]
+            assert dlg.panel.grid.count() == 3
+            dlg.panel.search_input.setText("alpha")
+            visible = [dlg.panel.grid.item(i).text() for i in range(3)
+                       if not dlg.panel.grid.item(i).isHidden()]
             assert visible == ["alpha.jpg"]
-            dlg.search_input.clear()
-            visible = [dlg.grid.item(i).text() for i in range(3)
-                       if not dlg.grid.item(i).isHidden()]
+            dlg.panel.search_input.clear()
+            visible = [dlg.panel.grid.item(i).text() for i in range(3)
+                       if not dlg.panel.grid.item(i).isHidden()]
             assert len(visible) == 3
         finally:
             dlg.deleteLater()
@@ -110,10 +110,37 @@ class TestSearchAndPreview:
     def test_preview_follows_selection(self, tmp_path):
         dlg = self._dlg(tmp_path)
         try:
-            dlg.grid.setCurrentRow(0)
-            assert dlg.name_label.text() == dlg.grid.item(0).text()
-            assert not dlg.preview_label.pixmap().isNull()
-            assert "·" in dlg.meta_label.text()
+            dlg.panel.grid.setCurrentRow(0)
+            assert dlg.panel.name_label.text() == dlg.panel.grid.item(0).text()
+            assert not dlg.panel.preview_label.pixmap().isNull()
+            assert "·" in dlg.panel.meta_label.text()
+        finally:
+            dlg.deleteLater()
+
+    def test_dialog_forwards_apply(self, tmp_path):
+        _make_jpg(tmp_path / "b.jpg")
+        dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
+        try:
+            received = []
+            dlg.file_chosen.connect(received.append)
+            dlg.panel.grid.setCurrentRow(0)
+            dlg.panel._apply_current()
+            assert len(received) == 1 and received[0].endswith("b.jpg")
+            assert dlg.result() == LibraryDialog.DialogCode.Accepted
+        finally:
+            dlg.deleteLater()
+
+    def test_panel_retranslate(self, tmp_path):
+        _make_jpg(tmp_path / "b.jpg")
+        dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
+        try:
+            dlg.panel.retranslate({"library_search": "Hledat…",
+                                    "library_apply": "Nastavit",
+                                    "library_count": "V knihovně: {n}",
+                                    "library_empty": "Prazdne"})
+            assert dlg.panel.search_input.placeholderText() == "Hledat…"
+            assert dlg.panel.apply_btn.text() == "Nastavit"
+            assert dlg.panel.info_label.text() == "V knihovně: 1"
         finally:
             dlg.deleteLater()
 

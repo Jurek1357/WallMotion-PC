@@ -44,6 +44,7 @@
   "screen_multi": "Obrazovky ({n}): {parts} | primární {w} × {h}",
   "screen_one": "Obrazovka: {w} × {h}",
   "screen_unknown": "Obrazovka: nezjištěna",
+  "settings_title": "Nastavení",
   "stop": "Zastavit / obnovit původní",
   "subtitle": "Nastav si obrázek nebo video jako pozadí plochy",
   "theme_dark": "Tmavý",

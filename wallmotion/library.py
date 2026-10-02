@@ -1,9 +1,9 @@
-"""In-app wallpaper library: dialog with a thumbnail grid.
+"""In-app wallpaper library: panel with a thumbnail grid.
 
-Wallpaper-Engine-style two panes (grid + live preview, search on top),
-but in WallMotion colors - native Qt, no browser, no QtWebEngine
-(which would break the AppImage). Double-click or the Apply button
-sets the selected file as wallpaper.
+Wallpaper-Engine-style two panes (grid + live preview, search on top)
+embedded as a tab in the main window - native Qt, no browser,
+no QtWebEngine (which would break the AppImage). Double-click or
+the Apply button emits file_chosen(path).
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ def preview_pixmap(kind: str, path: str, thumbs_dir: str | None = None,
     return placeholder_pixmap(w, h)
 
 
-class LibraryDialog(QDialog):
-    """Grid of downloaded wallpapers. Emits file_chosen(path) on apply."""
+class LibraryPanel(QWidget):
+    """Thumbnail grid with preview pane. Emits file_chosen(path)."""
 
     file_chosen = Signal(str)
 
@@ -75,11 +75,9 @@ class LibraryDialog(QDialog):
         self._media_dir = media_dir
         self._thumbs_dir = thumbs_dir
         self._meta: dict = {}
-        self.setWindowTitle(strings.get("library_title", "Library"))
-        self.setMinimumSize(720, 480)
-        self.resize(820, 540)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
@@ -102,12 +100,12 @@ class LibraryDialog(QDialog):
         panes.addWidget(self.grid, 1)
 
         side = QWidget()
-        side.setFixedWidth(300)
+        side.setFixedWidth(280)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumSize(PREVIEW_W, PREVIEW_H)
+        self.preview_label.setMinimumSize(260, PREVIEW_H)
         self.preview_label.setStyleSheet(
             "background: #25262e; border-radius: 12px;")
         side_layout.addWidget(self.preview_label)
@@ -129,10 +127,6 @@ class LibraryDialog(QDialog):
         self.apply_btn = QPushButton(strings.get("library_apply", "Set"))
         self.apply_btn.clicked.connect(self._apply_current)
         row.addWidget(self.apply_btn)
-        self.close_btn = QPushButton(strings.get("library_close", "Close"))
-        self.close_btn.setObjectName("secondary")
-        self.close_btn.clicked.connect(self.reject)
-        row.addWidget(self.close_btn)
         layout.addLayout(row)
 
         self.refresh()
@@ -206,6 +200,47 @@ class LibraryDialog(QDialog):
             path = current.data(Qt.ItemDataRole.UserRole)
             if path:
                 self.file_chosen.emit(str(path))
-                self.accept()
+        except Exception:
+            pass
+
+    def retranslate(self, strings: dict) -> None:
+        """Refresh texts after a language switch."""
+        try:
+            self._strings = strings
+            self.search_input.setPlaceholderText(
+                strings.get("library_search", "Search…"))
+            self.apply_btn.setText(strings.get("library_apply", "Set"))
+            self._update_info()
+        except Exception:
+            pass
+
+
+class LibraryDialog(QDialog):
+    """Standalone dialog wrapping LibraryPanel (kept for tests/tools)."""
+
+    file_chosen = Signal(str)
+
+    def __init__(self, strings: dict, media_dir: str,
+                 thumbs_dir: str | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(strings.get("library_title", "Library"))
+        self.setMinimumSize(720, 480)
+        self.resize(820, 540)
+        layout = QVBoxLayout(self)
+        self.panel = LibraryPanel(strings, media_dir, thumbs_dir, self)
+        self.panel.file_chosen.connect(self._forward)
+        layout.addWidget(self.panel)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        close_btn = QPushButton(strings.get("library_close", "Close"))
+        close_btn.setObjectName("secondary")
+        close_btn.clicked.connect(self.reject)
+        row.addWidget(close_btn)
+        layout.addLayout(row)
+
+    def _forward(self, path: str):
+        try:
+            self.file_chosen.emit(path)
+            self.accept()
         except Exception:
             pass

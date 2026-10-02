@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Library is a tab in the main window (settings | library, grid +
+  live preview + search) instead of a separate dialog; tray action
+  and button switch to the tab.
+
 ## [1.0.16] - 2026-10-02
 
 ### Changed

@@ -1,0 +1,222 @@
+"""In-app wallpaper library: dialog with a thumbnail grid.
+
+Wallpaper-Engine-style two panes (grid + live preview, search on top),
+but in WallMotion colors - native Qt, no browser, no QtWebEngine
+(which would break the AppImage). Double-click or the Apply button
+sets the selected file as wallpaper.
+"""
+
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from wallmotion.webui import ensure_thumbnail, list_media
+
+THUMB_W = 200
+THUMB_H = 130
+PREVIEW_W = 280
+PREVIEW_H = 180
+
+
+def placeholder_pixmap(w: int = THUMB_W, h: int = THUMB_H) -> QPixmap:
+    """Dark tile used when a preview cannot be made."""
+    try:
+        pix = QPixmap(w, h)
+        pix.fill(QColor("#25262e"))
+        return pix
+    except Exception:
+        return QPixmap()
+
+
+def preview_pixmap(kind: str, path: str, thumbs_dir: str | None = None,
+                   w: int = THUMB_W, h: int = THUMB_H) -> QPixmap:
+    """Thumbnail for a library item (video thumb or scaled image)."""
+    try:
+        source = None
+        if kind == "video":
+            source = ensure_thumbnail(path, thumbs_dir)
+        else:
+            source = path if os.path.exists(path) else None
+        if source:
+            pix = QPixmap(source)
+            if not pix.isNull():
+                return pix.scaled(
+                    w, h,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation)
+    except Exception:
+        pass
+    return placeholder_pixmap(w, h)
+
+
+def format_size(size: int) -> str:
+    """'2 MB' style label for the preview pane. Pure, unit-tested."""
+    try:
+        size = int(size)
+    except Exception:
+        return ""
+    if size >= 1048576:
+        return f"{size / 1048576:.1f} MB"
+    return f"{max(1, size // 1024)} KB"
+
+
+class LibraryDialog(QDialog):
+    """Grid of downloaded wallpapers. Emits file_chosen(path) on apply."""
+
+    file_chosen = Signal(str)
+
+    def __init__(self, strings: dict, media_dir: str,
+                 thumbs_dir: str | None = None, parent=None):
+        super().__init__(parent)
+        self._strings = strings
+        self._media_dir = media_dir
+        self._thumbs_dir = thumbs_dir
+        self._meta: dict = {}
+        self.setWindowTitle(strings.get("library_title", "Library"))
+        self.setMinimumSize(720, 480)
+        self.resize(820, 540)
+
+        layout = QVBoxLayout(self)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(
+            strings.get("library_search", "Search…"))
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._apply_filter)
+        layout.addWidget(self.search_input)
+
+        panes = QHBoxLayout()
+        panes.setSpacing(12)
+
+        self.grid = QListWidget()
+        self.grid.setViewMode(QListWidget.ViewMode.IconMode)
+        self.grid.setIconSize(QSize(THUMB_W, THUMB_H))
+        self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.grid.setMovement(QListWidget.Movement.Static)
+        self.grid.setSpacing(8)
+        self.grid.itemDoubleClicked.connect(self._apply_current)
+        self.grid.currentItemChanged.connect(self._update_preview)
+        panes.addWidget(self.grid, 1)
+
+        side = QWidget()
+        side.setFixedWidth(300)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_label = QLabel()
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setMinimumSize(PREVIEW_W, PREVIEW_H)
+        self.preview_label.setStyleSheet(
+            "background: #25262e; border-radius: 12px;")
+        side_layout.addWidget(self.preview_label)
+        self.name_label = QLabel()
+        self.name_label.setWordWrap(True)
+        self.name_label.setStyleSheet("font-weight: 600; font-size: 14px;")
+        side_layout.addWidget(self.name_label)
+        self.meta_label = QLabel()
+        self.meta_label.setStyleSheet("color: #9195a3; font-size: 12px;")
+        side_layout.addWidget(self.meta_label)
+        side_layout.addStretch(1)
+        panes.addWidget(side)
+
+        layout.addLayout(panes, 1)
+
+        row = QHBoxLayout()
+        self.info_label = QLabel()
+        row.addWidget(self.info_label, 1)
+        self.apply_btn = QPushButton(strings.get("library_apply", "Set"))
+        self.apply_btn.clicked.connect(self._apply_current)
+        row.addWidget(self.apply_btn)
+        self.close_btn = QPushButton(strings.get("library_close", "Close"))
+        self.close_btn.setObjectName("secondary")
+        self.close_btn.clicked.connect(self.reject)
+        row.addWidget(self.close_btn)
+        layout.addLayout(row)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        items = list_media(self._media_dir)
+        self._meta = {e["name"]: e for e in items}
+        self.grid.clear()
+        for entry in items:
+            try:
+                name, kind = entry["name"], entry["kind"]
+                full = os.path.join(self._media_dir, name)
+                item = QListWidgetItem(
+                    QIcon(preview_pixmap(kind, full, self._thumbs_dir)), name)
+                item.setData(Qt.ItemDataRole.UserRole, full)
+                self.grid.addItem(item)
+            except Exception:
+                continue
+        if self.grid.count() > 0:
+            self.grid.setCurrentRow(0)
+        self._apply_filter(self.search_input.text())
+        self._update_info()
+
+    def _update_info(self) -> None:
+        try:
+            total = len(self._meta)
+            if total:
+                self.info_label.setText(
+                    self._strings.get("library_count", "{n}").format(n=total))
+            else:
+                self.info_label.setText(
+                    self._strings.get("library_empty", ""))
+        except Exception:
+            pass
+
+    def _apply_filter(self, text: str) -> None:
+        needle = (text or "").strip().lower()
+        try:
+            for i in range(self.grid.count()):
+                item = self.grid.item(i)
+                item.setHidden(bool(needle) and needle not in item.text().lower())
+        except Exception:
+            pass
+
+    def _update_preview(self, *_args) -> None:
+        try:
+            current = self.grid.currentItem()
+            if current is None:
+                self.preview_label.setPixmap(placeholder_pixmap(
+                    PREVIEW_W, PREVIEW_H))
+                self.name_label.clear()
+                self.meta_label.clear()
+                return
+            name = current.text()
+            full = current.data(Qt.ItemDataRole.UserRole) or ""
+            kind = self._meta.get(name, {}).get("kind", "")
+            size = self._meta.get(name, {}).get("size", 0)
+            self.preview_label.setPixmap(
+                preview_pixmap(kind, full, self._thumbs_dir,
+                               PREVIEW_W, PREVIEW_H))
+            self.name_label.setText(name)
+            self.meta_label.setText(f"{kind} · {format_size(size)}")
+        except Exception:
+            pass
+
+    def _apply_current(self, *_args):
+        try:
+            current = self.grid.currentItem()
+            if current is None:
+                return
+            path = current.data(Qt.ItemDataRole.UserRole)
+            if path:
+                self.file_chosen.emit(str(path))
+                self.accept()
+        except Exception:
+            pass

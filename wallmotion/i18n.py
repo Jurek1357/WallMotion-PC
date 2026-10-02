@@ -63,9 +63,9 @@ QPushButton {{
     background-color: {ACCENT};
     color: white;
     border: none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    font-size: 13px;
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-size: 12px;
     font-weight: 600;
 }}
 QPushButton:hover {{

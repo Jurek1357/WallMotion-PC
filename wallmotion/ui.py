@@ -18,7 +18,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QAction,
     QColor,
-    QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
     QIcon,
@@ -1578,15 +1577,24 @@ class MainWindow(QMainWindow):
             debug_log(f"WEB apply exception: {e!r}")
 
     def open_library(self):
-        """Open the web library in the default browser."""
+        """Open the wallpaper library dialog (native grid with previews)."""
         try:
-            url = self.start_web_library()
-            if url:
-                QDesktopServices.openUrl(QUrl(url))
-            else:
-                self.status_label.setText(self.S()["web_failed"])
+            from wallmotion.library import LibraryDialog
+            from wallmotion.webui import media_dir, thumbs_dir
+            dialog = LibraryDialog(self.S(), media_dir(), thumbs_dir(), self)
+            dialog.file_chosen.connect(self._on_library_apply)
+            dialog.exec()
         except Exception as e:
-            debug_log(f"WEB open exception: {e!r}")
+            debug_log(f"LIB open exception: {e!r}")
+
+    def _on_library_apply(self, path: str):
+        """Apply a wallpaper chosen in the library dialog."""
+        try:
+            if path and os.path.exists(path):
+                self._on_file_chosen(path)
+                self.apply_wallpaper()
+        except Exception as e:
+            debug_log(f"LIB apply exception: {e!r}")
 
 
 def main():

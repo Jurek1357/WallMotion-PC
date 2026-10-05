@@ -92,6 +92,7 @@ class LibraryPanel(QWidget):
         self._media_dir = media_dir
         self._thumbs_dir = thumbs_dir
         self._meta: dict = {}
+        self.setObjectName("library")
         self.favorites: set = set()
         self.on_favorites_changed = None
         self._fav_only = False

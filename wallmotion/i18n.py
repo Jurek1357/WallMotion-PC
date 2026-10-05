@@ -43,6 +43,34 @@ QScrollArea {{
 QWidget#content {{
     background-color: {t['bg']};
 }}
+QWidget#library {{
+    background-color: {t['bg']};
+}}
+QTabWidget::pane {{
+    border: none;
+    background: transparent;
+}}
+QTabBar {{
+    background: transparent;
+    border: none;
+}}
+QTabBar::tab {{
+    background-color: {t['card']};
+    color: {t['dim']};
+    padding: 8px 20px;
+    margin-right: 4px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QTabBar::tab:selected {{
+    background-color: {ACCENT};
+    color: white;
+}}
+QTabBar::tab:hover:!selected {{
+    background-color: {t['card_hover']};
+}}
 QWidget {{
     color: {t['text']};
     font-family: "Segoe UI", sans-serif;

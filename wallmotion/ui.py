@@ -1817,9 +1817,10 @@ def main():
             pass
     else:
         # Normal launch (incl. autostart): restore the last wallpaper
-        # after the desktop settles.
+        # shortly after start (cold onefile start already takes seconds,
+        # so the desktop is settled - no need to wait longer).
         try:
-            QTimer.singleShot(2500, win.restore_last_wallpaper)
+            QTimer.singleShot(1000, win.restore_last_wallpaper)
         except Exception:
             pass
     try:

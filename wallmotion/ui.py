@@ -323,8 +323,18 @@ class MainWindow(QMainWindow):
         self.yt_progress.setValue(0)
         self.yt_progress.setTextVisible(False)
         self.yt_progress.setFixedHeight(6)
-        self.yt_progress.setVisible(False)
-        layout.addWidget(self.yt_progress)
+        self.yt_progress_row = QWidget()
+        progress_layout = QHBoxLayout(self.yt_progress_row)
+        progress_layout.setContentsMargins(0, 2, 0, 2)
+        progress_layout.setSpacing(8)
+        progress_layout.addWidget(self.yt_progress, 1)
+        self.yt_percent = QLabel("0%")
+        self.yt_percent.setObjectName("status")
+        self.yt_percent.setFixedWidth(48)
+        self.yt_percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        progress_layout.addWidget(self.yt_percent)
+        self.yt_progress_row.setVisible(False)
+        layout.addWidget(self.yt_progress_row)
 
         # -- downloaded videos folder -----------------------------------
         self.folder_button = QPushButton()
@@ -1075,15 +1085,17 @@ class MainWindow(QMainWindow):
             value = parse_progress_percent(pct)
             if value is not None:
                 self.yt_progress.setValue(int(round(value)))
-                if not self.yt_progress.isVisible():
-                    self.yt_progress.setVisible(True)
+                self.yt_percent.setText(f"{value:.0f}%")
+                if not self.yt_progress_row.isVisible():
+                    self.yt_progress_row.setVisible(True)
         except Exception:
             pass
 
     def _hide_yt_progress(self):
         try:
             self.yt_progress.setValue(0)
-            self.yt_progress.setVisible(False)
+            self.yt_percent.setText("0%")
+            self.yt_progress_row.setVisible(False)
         except Exception:
             pass
 

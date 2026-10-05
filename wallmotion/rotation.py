@@ -113,6 +113,14 @@ class RotationQueue:
         except Exception:
             return None
 
+    def restart(self) -> str | None:
+        """Start over from the top: next_file() returns the first item."""
+        try:
+            self.index = len(self._order) - 1 if self._order else 0
+        except Exception:
+            pass
+        return self.next_file()
+
     def to_config(self) -> dict:
         return {"files": list(self.files), "index": self.index,
                 "shuffle": self.shuffle}

@@ -43,6 +43,7 @@
   "rotation_count": "V rotaci: {n}",
   "rotation_enable": "Rotovat tapety",
   "rotation_interval": "Interval:",
+  "rotation_play": "Přehrát seznam",
   "rotation_shuffle": "Náhodně",
   "screen_multi": "Obrazovky ({n}): {parts} | primární {w} × {h}",
   "screen_one": "Obrazovka: {w} × {h}",

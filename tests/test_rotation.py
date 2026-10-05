@@ -56,6 +56,18 @@ class TestQueue:
 
     def test_empty(self):
         assert RotationQueue().next_file() is None
+        assert RotationQueue().restart() is None
+
+    def test_restart_starts_from_top(self, tmp_path):
+        paths = []
+        for name in ("a.mp4", "b.mp4", "c.mp4"):
+            p = tmp_path / name
+            p.write_bytes(b"x")
+            paths.append(str(p))
+        q = RotationQueue(paths)
+        assert q.next_file() == paths[1]
+        assert q.restart() == paths[0]
+        assert q.next_file() == paths[1]
 
     def test_remove(self, tmp_path):
         a = tmp_path / "a.mp4"

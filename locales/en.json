@@ -43,6 +43,7 @@
   "rotation_count": "In rotation: {n}",
   "rotation_enable": "Rotate wallpapers",
   "rotation_interval": "Interval:",
+  "rotation_play": "Play list",
   "rotation_shuffle": "Shuffle",
   "screen_multi": "Displays ({n}): {parts} | primary {w} × {h}",
   "screen_one": "Display: {w} × {h}",

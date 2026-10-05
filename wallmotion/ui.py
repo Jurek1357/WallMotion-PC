@@ -423,6 +423,9 @@ class MainWindow(QMainWindow):
         self.rotation_add_btn.setObjectName("secondary")
         self.rotation_add_btn.clicked.connect(self._on_rotation_add)
         rot_btn_row.addWidget(self.rotation_add_btn, 1)
+        self.rotation_play_btn = QPushButton()
+        self.rotation_play_btn.clicked.connect(self._on_rotation_play)
+        rot_btn_row.addWidget(self.rotation_play_btn, 1)
         self.rotation_clear_btn = QPushButton()
         self.rotation_clear_btn.setObjectName("secondary")
         self.rotation_clear_btn.clicked.connect(self._on_rotation_clear)
@@ -932,6 +935,7 @@ class MainWindow(QMainWindow):
         self.rotation_interval_label.setText(s["rotation_interval"])
         self.rotation_shuffle_checkbox.setText(s["rotation_shuffle"])
         self.rotation_add_btn.setText(s["rotation_add"])
+        self.rotation_play_btn.setText(s["rotation_play"])
         self.rotation_clear_btn.setText(s["rotation_clear"])
         self._refresh_rotation_label()
         self.volume_label.setText(s["volume_label"])
@@ -1272,6 +1276,28 @@ class MainWindow(QMainWindow):
             if self.rotation.add(self.selected_path):
                 self._save_config()
         self._refresh_rotation_label()
+
+    def _on_rotation_play(self):
+        """Start the list right now (from the top), then keep rotating."""
+        try:
+            if not self.rotation.files:
+                return
+            self.rotation_enabled = True
+            try:
+                self.rotation_checkbox.blockSignals(True)
+                self.rotation_checkbox.setChecked(True)
+                self.rotation_checkbox.blockSignals(False)
+            except Exception:
+                pass
+            path = self.rotation.restart()
+            if path:
+                self._on_file_chosen(path)
+                self.apply_wallpaper()
+            self._save_config()
+            self._restart_rotation_timer()
+            self._refresh_rotation_label()
+        except Exception as e:
+            debug_log(f"ROTATION play exception: {e!r}")
 
     def _on_rotation_clear(self):
         self.rotation.clear()

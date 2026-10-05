@@ -71,6 +71,20 @@ QTabBar::tab:selected {{
 QTabBar::tab:hover:!selected {{
     background-color: {t['card_hover']};
 }}
+QListWidget#library_grid {{
+    background-color: {t['bg']};
+    border: none;
+    outline: none;
+}}
+QListWidget#library_grid::item {{
+    color: {t['text']};
+    border-radius: 8px;
+    padding: 4px;
+}}
+QListWidget#library_grid::item:selected {{
+    background-color: {ACCENT};
+    color: white;
+}}
 QWidget {{
     color: {t['text']};
     font-family: "Segoe UI", sans-serif;

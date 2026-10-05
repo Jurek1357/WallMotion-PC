@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from wallmotion.i18n import T
 from wallmotion.webui import ensure_thumbnail, format_size, list_media
 
 THUMB_W = 200
@@ -49,11 +50,12 @@ def toggle_favorite(favorites, path: str) -> set:
             return set()
 
 
-def placeholder_pixmap(w: int = THUMB_W, h: int = THUMB_H) -> QPixmap:
+def placeholder_pixmap(w: int = THUMB_W, h: int = THUMB_H,
+                       color: str | None = None) -> QPixmap:
     """Dark tile used when a preview cannot be made."""
     try:
         pix = QPixmap(w, h)
-        pix.fill(QColor("#25262e"))
+        pix.fill(QColor(color or T("card")))
         return pix
     except Exception:
         return QPixmap()
@@ -125,6 +127,7 @@ class LibraryPanel(QWidget):
         panes.setSpacing(12)
 
         self.grid = QListWidget()
+        self.grid.setObjectName("library_grid")
         self.grid.setViewMode(QListWidget.ViewMode.IconMode)
         self.grid.setIconSize(QSize(THUMB_W, THUMB_H))
         self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -141,15 +144,14 @@ class LibraryPanel(QWidget):
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setMinimumSize(260, PREVIEW_H)
-        self.preview_label.setStyleSheet(
-            "background: #25262e; border-radius: 12px;")
+        self._style_preview()
         side_layout.addWidget(self.preview_label)
         self.name_label = QLabel()
         self.name_label.setWordWrap(True)
         self.name_label.setStyleSheet("font-weight: 600; font-size: 14px;")
         side_layout.addWidget(self.name_label)
         self.meta_label = QLabel()
-        self.meta_label.setStyleSheet("color: #9195a3; font-size: 12px;")
+        self._style_meta()
         side_layout.addWidget(self.meta_label)
         side_layout.addStretch(1)
         panes.addWidget(side)
@@ -279,6 +281,20 @@ class LibraryPanel(QWidget):
         except Exception:
             pass
 
+    def _style_preview(self) -> None:
+        try:
+            self.preview_label.setStyleSheet(
+                f"background: {T('card')}; border-radius: 12px;")
+        except Exception:
+            pass
+
+    def _style_meta(self) -> None:
+        try:
+            self.meta_label.setStyleSheet(
+                f"color: {T('dim')}; font-size: 12px;")
+        except Exception:
+            pass
+
     def retranslate(self, strings: dict) -> None:
         """Refresh texts after a language switch."""
         try:
@@ -288,6 +304,8 @@ class LibraryPanel(QWidget):
             self.apply_btn.setText(strings.get("library_apply", "Set"))
             self.fav_only_checkbox.setText(
                 strings.get("library_fav_only", "Favorites"))
+            self._style_preview()
+            self._style_meta()
             self._refresh_star()
             self._update_info()
         except Exception:

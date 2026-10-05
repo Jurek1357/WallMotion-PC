@@ -415,6 +415,11 @@ class MainWindow(QMainWindow):
         self.rotation_shuffle_checkbox.toggled.connect(
             self._on_rotation_settings_changed)
         rot_row.addWidget(self.rotation_shuffle_checkbox)
+        self.rotation_repeat_checkbox = QCheckBox()
+        self.rotation_repeat_checkbox.setChecked(True)
+        self.rotation_repeat_checkbox.toggled.connect(
+            self._on_rotation_settings_changed)
+        rot_row.addWidget(self.rotation_repeat_checkbox)
         layout.addLayout(rot_row)
 
         rot_btn_row = QHBoxLayout()
@@ -663,6 +668,9 @@ class MainWindow(QMainWindow):
                     self.rotation_shuffle_checkbox.blockSignals(True)
                     self.rotation_shuffle_checkbox.setChecked(self.rotation.shuffle)
                     self.rotation_shuffle_checkbox.blockSignals(False)
+                    self.rotation_repeat_checkbox.blockSignals(True)
+                    self.rotation_repeat_checkbox.setChecked(self.rotation.repeat)
+                    self.rotation_repeat_checkbox.blockSignals(False)
                     idx = list(INTERVALS).index(self.rotation_interval)
                     self.rotation_interval_combo.blockSignals(True)
                     self.rotation_interval_combo.setCurrentIndex(idx)
@@ -941,6 +949,7 @@ class MainWindow(QMainWindow):
         self.rotation_checkbox.setText(s["rotation_enable"])
         self.rotation_interval_label.setText(s["rotation_interval"])
         self.rotation_shuffle_checkbox.setText(s["rotation_shuffle"])
+        self.rotation_repeat_checkbox.setText(s["rotation_repeat"])
         self.rotation_add_btn.setText(s["rotation_add"])
         self.rotation_play_btn.setText(s["rotation_play"])
         self.rotation_skip_btn.setText(s["rotation_skip"])
@@ -1274,6 +1283,7 @@ class MainWindow(QMainWindow):
             self.rotation_interval = self._rotation_interval_seconds()
             self.rotation.set_shuffle(
                 self.rotation_shuffle_checkbox.isChecked())
+            self.rotation.repeat = self.rotation_repeat_checkbox.isChecked()
         except Exception:
             pass
         self._save_config()
@@ -1337,6 +1347,21 @@ class MainWindow(QMainWindow):
         try:
             path = self.rotation.next_file()
             if not path:
+                return
+            if (not self.rotation.repeat and path == self.selected_path
+                    and self.rotation.files):
+                # End of a non-repeating list: keep the last wallpaper
+                # and switch rotation off.
+                self.rotation_enabled = False
+                try:
+                    self.rotation_checkbox.blockSignals(True)
+                    self.rotation_checkbox.setChecked(False)
+                    self.rotation_checkbox.blockSignals(False)
+                except Exception:
+                    pass
+                self._save_config()
+                self._restart_rotation_timer()
+                self._refresh_rotation_label()
                 return
             self._on_file_chosen(path)
             self.apply_wallpaper()

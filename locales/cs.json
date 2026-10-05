@@ -49,6 +49,7 @@
   "rotation_enable": "Rotovat tapety",
   "rotation_interval": "Interval:",
   "rotation_play": "Přehrát seznam",
+  "rotation_repeat": "Opakovat",
   "rotation_shuffle": "Náhodně",
   "rotation_skip": "Přeskočit",
   "screen_multi": "Obrazovky ({n}): {parts} | primární {w} × {h}",

@@ -31,10 +31,11 @@ class RotationQueue:
     """Ordered file list with a cursor. All logic, no I/O."""
 
     def __init__(self, files=None, index: int = 0, shuffle: bool = False,
-                 seed=None):
+                 seed=None, repeat: bool = True):
         self.files = list(files or [])
         self.index = max(0, int(index))
         self.shuffle = bool(shuffle)
+        self.repeat = bool(repeat)
         self._rng = random.Random(seed)
         self._order = self._build_order()
 
@@ -100,10 +101,17 @@ class RotationQueue:
             return 0
 
     def next_file(self) -> str | None:
-        """Advance the cursor and return the next existing file (or None)."""
+        """Advance the cursor and return the next existing file (or None).
+
+        Without repeat the queue stops at the last item (returns None
+        instead of wrapping) so the final wallpaper stays on.
+        """
         try:
             if not self.files or not self._order:
                 return None
+            if not self.repeat and self.index >= len(self._order) - 1:
+                last = self.files[self._order[-1]]
+                return last if os.path.exists(last) else None
             for _ in range(len(self._order)):
                 self.index = (self.index + 1) % len(self._order)
                 path = self.files[self._order[self.index]]
@@ -116,14 +124,14 @@ class RotationQueue:
     def restart(self) -> str | None:
         """Start over from the top: next_file() returns the first item."""
         try:
-            self.index = len(self._order) - 1 if self._order else 0
+            self.index = -1
         except Exception:
             pass
         return self.next_file()
 
     def to_config(self) -> dict:
         return {"files": list(self.files), "index": self.index,
-                "shuffle": self.shuffle}
+                "shuffle": self.shuffle, "repeat": self.repeat}
 
     @classmethod
     def from_config(cls, data: dict | None) -> RotationQueue:
@@ -134,6 +142,7 @@ class RotationQueue:
                 files = []
             return cls(files=[str(p) for p in files],
                        index=int(data.get("index", 0)),
-                       shuffle=bool(data.get("shuffle", False)))
+                       shuffle=bool(data.get("shuffle", False)),
+                       repeat=bool(data.get("repeat", True)))
         except Exception:
             return cls()

@@ -69,6 +69,23 @@ class TestQueue:
         assert q.restart() == paths[0]
         assert q.next_file() == paths[1]
 
+    def test_no_repeat_stops_at_last(self, tmp_path):
+        paths = []
+        for name in ("a.mp4", "b.mp4"):
+            p = tmp_path / name
+            p.write_bytes(b"x")
+            paths.append(str(p))
+        q = RotationQueue(paths, repeat=False)
+        assert q.restart() == paths[0]
+        assert q.next_file() == paths[1]
+        assert q.next_file() == paths[1]  # stays, no wrap
+
+    def test_repeat_config_roundtrip(self, tmp_path):
+        q = RotationQueue([], repeat=False)
+        q2 = RotationQueue.from_config(q.to_config())
+        assert q2.repeat is False
+        assert RotationQueue.from_config({}).repeat is True
+
     def test_remove(self, tmp_path):
         a = tmp_path / "a.mp4"
         b = tmp_path / "b.mp4"

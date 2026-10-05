@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QStyle,
@@ -95,6 +96,7 @@ from wallmotion.youtube import (
     PlaylistFetchWorker,
     is_playlist_url,
     is_valid_youtube_url,
+    parse_progress_percent,
 )
 
 
@@ -437,6 +439,14 @@ class MainWindow(QMainWindow):
         self.status_label.setObjectName("status")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+
+        self.yt_progress = QProgressBar()
+        self.yt_progress.setRange(0, 100)
+        self.yt_progress.setValue(0)
+        self.yt_progress.setTextVisible(False)
+        self.yt_progress.setFixedHeight(6)
+        self.yt_progress.setVisible(False)
+        layout.addWidget(self.yt_progress)
 
         # Tabs: settings + wallpaper library (Wallpaper-Engine style).
         from wallmotion.library import LibraryPanel
@@ -1061,10 +1071,26 @@ class MainWindow(QMainWindow):
             )
         else:
             self.status_label.setText(self.S()["yt_downloading"].format(p=pct))
+        try:
+            value = parse_progress_percent(pct)
+            if value is not None:
+                self.yt_progress.setValue(int(round(value)))
+                if not self.yt_progress.isVisible():
+                    self.yt_progress.setVisible(True)
+        except Exception:
+            pass
+
+    def _hide_yt_progress(self):
+        try:
+            self.yt_progress.setValue(0)
+            self.yt_progress.setVisible(False)
+        except Exception:
+            pass
 
     def _on_yt_finished(self, path: str):
         s = self.S()
         debug_log(f"YT: stazeno {path}")
+        self._hide_yt_progress()
         self.status_label.setText(s["yt_done"])
         self._on_file_chosen(path)
         # set as wallpaper right after download
@@ -1074,8 +1100,15 @@ class MainWindow(QMainWindow):
 
     def _on_yt_error(self, err: str):
         debug_log(f"YT CHYBA: {err}")
+        self._hide_yt_progress()
         if err == "NEED_FFMPEG":
             err = self.S()["yt_need_ffmpeg"]
+        elif err == "NEED_SIGNIN":
+            err = self.S()["yt_need_signin"]
+        elif err == "UNAVAILABLE":
+            err = self.S()["yt_unavailable"]
+        elif err == "TIMEOUT":
+            err = self.S()["yt_timeout"]
         self.status_label.setText(self.S()["yt_error"].format(e=err))
         # playlist queue: skip the broken video, keep going
         self._on_queue_item_done()

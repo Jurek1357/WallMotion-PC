@@ -89,6 +89,17 @@ QListWidget#library_grid::item:selected {{
     background-color: {ACCENT};
     color: white;
 }}
+QProgressBar {{
+    background-color: {t['card']};
+    border: none;
+    border-radius: 3px;
+    min-height: 6px;
+    max-height: 6px;
+}}
+QProgressBar::chunk {{
+    background-color: {ACCENT};
+    border-radius: 3px;
+}}
 QWidget {{
     color: {t['text']};
     font-family: "Segoe UI", sans-serif;

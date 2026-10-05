@@ -9,7 +9,9 @@ from wallmotion.youtube import (
     _YT_FORMAT_SINGLE,
     is_playlist_url,
     is_valid_youtube_url,
+    map_download_error,
     parse_playlist_entries,
+    parse_progress_percent,
 )
 
 
@@ -180,3 +182,44 @@ class TestParsePlaylistEntries:
     def test_empty_info(self):
         assert parse_playlist_entries({}) == []
         assert parse_playlist_entries({"entries": None}) == []
+
+
+class TestParseProgressPercent:
+    def test_plain(self):
+        assert parse_progress_percent("42.5%") == 42.5
+        assert parse_progress_percent("  7%  ") == 7.0
+        assert parse_progress_percent("100%") == 100.0
+        assert parse_progress_percent("0%") == 0.0
+
+    def test_garbage(self):
+        assert parse_progress_percent("") is None
+        assert parse_progress_percent("N/A") is None
+        assert parse_progress_percent(None) is None
+        assert parse_progress_percent("150%") is None
+        assert parse_progress_percent("-5%") is None
+
+
+class TestMapDownloadError:
+    def test_signin(self):
+        assert map_download_error(
+            "ERROR: Sign in to confirm you're not a bot") == "NEED_SIGNIN"
+
+    def test_unavailable(self):
+        assert map_download_error("ERROR: Private video") == "UNAVAILABLE"
+        assert map_download_error("ERROR: Video unavailable") == "UNAVAILABLE"
+
+    def test_timeout(self):
+        assert map_download_error("ERROR: Read timed out") == "TIMEOUT"
+        assert map_download_error("ERROR: Operation timed out") == "TIMEOUT"
+
+    def test_passthrough(self):
+        assert map_download_error("soubor se nenasel") == "soubor se nenasel"
+
+    def test_ffmpeg_hint(self, monkeypatch):
+        import wallmotion.youtube as yt
+        monkeypatch.setattr(yt, "_ffmpeg_available", lambda: False)
+        assert map_download_error(
+            "ERROR: Requested format is not available") == "NEED_FFMPEG"
+        monkeypatch.setattr(yt, "_ffmpeg_available", lambda: True)
+        assert map_download_error(
+            "ERROR: Requested format is not available").startswith("ERROR:")

@@ -232,6 +232,39 @@ _YT_FORMAT_SINGLE = (
 )
 
 
+def parse_progress_percent(text: str) -> float | None:
+    """' 42.5%' -> 42.5 for the progress bar. Pure, unit-tested."""
+    try:
+        cleaned = str(text or "").strip()
+        if cleaned.endswith("%"):
+            cleaned = cleaned[:-1].strip()
+        value = float(cleaned)
+        if 0.0 <= value <= 100.0:
+            return value
+    except Exception:
+        pass
+    return None
+
+
+def map_download_error(err: str) -> str:
+    """Map raw yt-dlp errors to short codes. Pure, unit-tested.
+
+    Codes (resolved to locale strings in the UI): NEED_FFMPEG,
+    NEED_SIGNIN, UNAVAILABLE, TIMEOUT. Anything else passes through.
+    """
+    text = str(err or "")
+    if "Requested format is not available" in text and not _ffmpeg_available():
+        return "NEED_FFMPEG"
+    if "Sign in to confirm" in text:
+        return "NEED_SIGNIN"
+    if "Private video" in text or "Video unavailable" in text:
+        return "UNAVAILABLE"
+    lowered = text.lower()
+    if "timed out" in lowered or "timeout" in lowered:
+        return "TIMEOUT"
+    return text[:300]
+
+
 class DownloadWorker(QThread):
     progress = Signal(str)
     finished = Signal(str)
@@ -292,6 +325,12 @@ class DownloadWorker(QThread):
                 "noplaylist": True,
                 "noprogress": True,  # custom progress sent via signal
                 "max_filesize": 500 * 1024 * 1024,  # guard against GB-sized videos
+                # Fail fast instead of hanging forever on throttled
+                # connections (YouTube stalls googlevideo streams rather
+                # than refusing them).
+                "socket_timeout": 25,
+                "retries": 3,
+                "fragment_retries": 3,
                 "progress_hooks": [hook],
             }
             ffexe = _ffmpeg_exe()
@@ -308,10 +347,4 @@ class DownloadWorker(QThread):
             else:
                 self.error.emit("soubor se nenasel")
         except Exception as e:
-            # Some videos (like this one) have no single file
-            # with both video and audio - audio can only be merged via ffmpeg.
-            # Without it send an install hint instead of a cryptic message.
-            if "Requested format is not available" in str(e) and not _ffmpeg_available():
-                self.error.emit("NEED_FFMPEG")
-            else:
-                self.error.emit(str(e)[:300])
+            self.error.emit(map_download_error(e))

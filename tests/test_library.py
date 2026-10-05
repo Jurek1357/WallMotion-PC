@@ -9,6 +9,7 @@ try:
         LibraryDialog,
         placeholder_pixmap,
         preview_pixmap,
+        toggle_favorite,
     )
     _HAVE_QT = True
 except Exception:
@@ -141,6 +142,34 @@ class TestSearchAndPreview:
             assert dlg.panel.search_input.placeholderText() == "Hledat…"
             assert dlg.panel.apply_btn.text() == "Nastavit"
             assert dlg.panel.info_label.text() == "V knihovně: 1"
+        finally:
+            dlg.deleteLater()
+
+
+class TestFavorites:
+    def test_toggle(self):
+        assert toggle_favorite(set(), "/a.mp4") == {"/a.mp4"}
+        assert toggle_favorite({"/a.mp4"}, "/a.mp4") == set()
+        assert toggle_favorite(None, "") == set()
+
+    def test_star_and_filter(self, tmp_path):
+        _make_jpg(tmp_path / "a.jpg")
+        _make_jpg(tmp_path / "b.jpg")
+        dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
+        try:
+            panel = dlg.panel
+            assert panel.fav_button.text() == "☆"
+            panel.grid.setCurrentRow(0)
+            panel._toggle_favorite_current()
+            assert panel.fav_button.text() == "★"
+            assert len(panel.favorites) == 1
+            panel.fav_only_checkbox.setChecked(True)
+            visible = [panel.grid.item(i).text()
+                       for i in range(panel.grid.count())
+                       if not panel.grid.item(i).isHidden()]
+            assert len(visible) == 1
+            panel._toggle_favorite_current()
+            assert panel.fav_button.text() == "☆"
         finally:
             dlg.deleteLater()
 

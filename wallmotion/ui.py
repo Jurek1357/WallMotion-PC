@@ -51,6 +51,8 @@ from PySide6.QtWidgets import (
 )
 
 from wallmotion import cli, instance, screens, volumememory
+from wallmotion.autostart import is_enabled as autostart_is_enabled
+from wallmotion.autostart import set_enabled as autostart_set_enabled
 from wallmotion.config import CONFIG_PATH
 from wallmotion.i18n import (
     ACCENT,
@@ -65,6 +67,7 @@ from wallmotion.linux_video import LinuxVideoWallpaper
 from wallmotion.platform import get_backend
 from wallmotion.rotation import INTERVALS, RotationQueue, format_interval
 from wallmotion.slider import PinSlider
+from wallmotion.systemtheme import read_system_theme
 from wallmotion.updatecheck import (
     UpdateCheckWorker,
     is_newer,
@@ -242,6 +245,10 @@ class MainWindow(QMainWindow):
         self._update_last_check = 0.0
         self._update_last_seen = ""
         self._volumes = {}
+        self.favorites = set()
+        self.theme_follow_system = False
+        self.theme_poll_timer = QTimer(self)
+        self.theme_poll_timer.timeout.connect(self._poll_system_theme)
         self.web_server = None
         self._web_bridge = None
         self.rotation = RotationQueue()
@@ -351,6 +358,21 @@ class MainWindow(QMainWindow):
         vol_row.addWidget(self.volume_value)
         layout.addLayout(vol_row)
 
+        # -- autostart + system theme --------------------------------------
+        sys_row = QHBoxLayout()
+        sys_row.setSpacing(8)
+        self.autostart_checkbox = QCheckBox()
+        self.autostart_checkbox.setChecked(False)
+        self.autostart_checkbox.toggled.connect(self._on_autostart_toggled)
+        sys_row.addWidget(self.autostart_checkbox)
+        self.theme_follow_checkbox = QCheckBox()
+        self.theme_follow_checkbox.setChecked(False)
+        self.theme_follow_checkbox.toggled.connect(
+            self._on_theme_follow_toggled)
+        sys_row.addWidget(self.theme_follow_checkbox)
+        sys_row.addStretch(1)
+        layout.addLayout(sys_row)
+
         # -- rotace tapet ------------------------------------------------
         rot_row = QHBoxLayout()
         rot_row.setSpacing(8)
@@ -421,6 +443,8 @@ class MainWindow(QMainWindow):
         from wallmotion.webui import media_dir, thumbs_dir
         self.library_panel = LibraryPanel(self.S(), media_dir(), thumbs_dir())
         self.library_panel.file_chosen.connect(self._on_library_apply)
+        self.library_panel.favorites = set(self.favorites)
+        self.library_panel.on_favorites_changed = self._save_config
         self.tabs = QTabWidget()
         self.tabs.addTab(content, "")
         self.tabs.addTab(self.library_panel, "")
@@ -628,6 +652,42 @@ class MainWindow(QMainWindow):
                     self.drop_zone.set_file(path)
                 if self.selected_path:
                     self._apply_volume_memory(self.selected_path)
+                try:
+                    favs = cfg.get("favorites", [])
+                    self.favorites = {str(p) for p in favs if p}
+                except Exception:
+                    self.favorites = set()
+                try:
+                    self.theme_follow_system = bool(
+                        cfg.get("theme_follow_system", False))
+                except Exception:
+                    self.theme_follow_system = False
+            except Exception:
+                pass
+        try:
+            self.theme_follow_checkbox.blockSignals(True)
+            self.theme_follow_checkbox.setChecked(self.theme_follow_system)
+            self.theme_follow_checkbox.blockSignals(False)
+            self.theme_button.setEnabled(not self.theme_follow_system)
+        except Exception:
+            pass
+        try:
+            supported = sys.platform == "win32" or sys.platform.startswith("linux")
+            self.autostart_checkbox.setVisible(supported)
+            if supported:
+                self.autostart_checkbox.blockSignals(True)
+                self.autostart_checkbox.setChecked(autostart_is_enabled())
+                self.autostart_checkbox.blockSignals(False)
+        except Exception:
+            pass
+        try:
+            self.library_panel.favorites = set(self.favorites)
+            self.library_panel.refresh()
+        except Exception:
+            pass
+        if self.theme_follow_system:
+            try:
+                self.theme_poll_timer.start(15000)
             except Exception:
                 pass
         self._restart_rotation_timer()
@@ -658,6 +718,8 @@ class MainWindow(QMainWindow):
                     "update_last_check": self._update_last_check,
                     "update_last_seen": self._update_last_seen,
                     "volumes": self._volumes,
+                    "favorites": sorted(self.favorites),
+                    "theme_follow_system": self.theme_follow_system,
                     "rotation": {
                         **self.rotation.to_config(),
                         "enabled": self.rotation_enabled,
@@ -735,6 +797,56 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _on_autostart_toggled(self, checked: bool):
+        """Create/remove the OS autostart entry. Reverts on failure."""
+        try:
+            ok = autostart_set_enabled(bool(checked))
+        except Exception:
+            ok = False
+        if not ok:
+            try:
+                self.autostart_checkbox.blockSignals(True)
+                self.autostart_checkbox.setChecked(not checked)
+                self.autostart_checkbox.blockSignals(False)
+            except Exception:
+                pass
+            debug_log("AUTOSTART: change failed, reverted")
+
+    def _on_theme_follow_toggled(self, checked: bool):
+        """Follow the OS theme (disables the manual toggle button)."""
+        self.theme_follow_system = bool(checked)
+        self._save_config()
+        try:
+            self.theme_button.setEnabled(not self.theme_follow_system)
+        except Exception:
+            pass
+        if self.theme_follow_system:
+            try:
+                system_theme = read_system_theme()
+                if system_theme in ("dark", "light"):
+                    self.apply_theme(system_theme)
+                    self.retranslate()
+                self.theme_poll_timer.start(15000)
+            except Exception:
+                pass
+        else:
+            try:
+                self.theme_poll_timer.stop()
+            except Exception:
+                pass
+
+    def _poll_system_theme(self):
+        """Apply the OS theme when it changed (only in follow mode)."""
+        try:
+            if not self.theme_follow_system:
+                return
+            system_theme = read_system_theme()
+            if system_theme in ("dark", "light") and system_theme != self.theme:
+                self.apply_theme(system_theme)
+                self.retranslate()
+        except Exception as e:
+            debug_log(f"THEME poll exception: {e!r}")
+
     def _on_volume_changed(self, value: int):
         """Save the volume and immediately apply it to the running wallpaper."""
         self.volume_value.setText(f"{int(value)}%")
@@ -788,6 +900,8 @@ class MainWindow(QMainWindow):
         self.pause_batt_checkbox.setText(s["pause_battery"])
         self.monitor_label.setText(s["monitor_label"])
         self._refresh_monitor_combo()
+        self.autostart_checkbox.setText(s["autostart"])
+        self.theme_follow_checkbox.setText(s["theme_auto"])
         self.rotation_checkbox.setText(s["rotation_enable"])
         self.rotation_interval_label.setText(s["rotation_interval"])
         self.rotation_shuffle_checkbox.setText(s["rotation_shuffle"])

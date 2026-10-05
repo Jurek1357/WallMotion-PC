@@ -13,6 +13,7 @@ import os
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -30,6 +31,22 @@ THUMB_W = 200
 THUMB_H = 130
 PREVIEW_W = 280
 PREVIEW_H = 180
+
+
+def toggle_favorite(favorites, path: str) -> set:
+    """Add/remove path from the favorites set. Pure, unit-tested."""
+    try:
+        favs = set(favorites or [])
+        if path in favs:
+            favs.discard(path)
+        elif path:
+            favs.add(path)
+        return favs
+    except Exception:
+        try:
+            return set(favorites or [])
+        except Exception:
+            return set()
 
 
 def placeholder_pixmap(w: int = THUMB_W, h: int = THUMB_H) -> QPixmap:
@@ -75,6 +92,9 @@ class LibraryPanel(QWidget):
         self._media_dir = media_dir
         self._thumbs_dir = thumbs_dir
         self._meta: dict = {}
+        self.favorites: set = set()
+        self.on_favorites_changed = None
+        self._fav_only = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -84,7 +104,21 @@ class LibraryPanel(QWidget):
             strings.get("library_search", "Search…"))
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._apply_filter)
-        layout.addWidget(self.search_input)
+
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        search_row.addWidget(self.search_input, 1)
+        self.fav_only_checkbox = QCheckBox(
+            strings.get("library_fav_only", "Favorites"))
+        self.fav_only_checkbox.toggled.connect(self._on_fav_only_toggled)
+        search_row.addWidget(self.fav_only_checkbox)
+        self.fav_button = QPushButton("★")
+        self.fav_button.setToolTip(strings.get("library_fav_tip", "Favorite"))
+        self.fav_button.setObjectName("secondary")
+        self.fav_button.setFixedWidth(44)
+        self.fav_button.clicked.connect(self._toggle_favorite_current)
+        search_row.addWidget(self.fav_button)
+        layout.addLayout(search_row)
 
         panes = QHBoxLayout()
         panes.setSpacing(12)
@@ -148,6 +182,7 @@ class LibraryPanel(QWidget):
         if self.grid.count() > 0:
             self.grid.setCurrentRow(0)
         self._apply_filter(self.search_input.text())
+        self._refresh_star()
         self._update_info()
 
     def _update_info(self) -> None:
@@ -167,12 +202,52 @@ class LibraryPanel(QWidget):
         try:
             for i in range(self.grid.count()):
                 item = self.grid.item(i)
-                item.setHidden(bool(needle) and needle not in item.text().lower())
+                full = item.data(Qt.ItemDataRole.UserRole) or ""
+                hidden = bool(needle) and needle not in item.text().lower()
+                if not hidden and self._fav_only and full not in self.favorites:
+                    hidden = True
+                item.setHidden(hidden)
+        except Exception:
+            pass
+
+    def _on_fav_only_toggled(self, checked: bool):
+        self._fav_only = bool(checked)
+        self._apply_filter(self.search_input.text())
+
+    def _toggle_favorite_current(self):
+        try:
+            current = self.grid.currentItem()
+            if current is None:
+                return
+            full = str(current.data(Qt.ItemDataRole.UserRole) or "")
+            if not full:
+                return
+            self.favorites = toggle_favorite(self.favorites, full)
+            try:
+                if callable(self.on_favorites_changed):
+                    self.on_favorites_changed()
+            except Exception:
+                pass
+            self._refresh_star()
+            self._apply_filter(self.search_input.text())
+        except Exception:
+            pass
+
+    def _refresh_star(self) -> None:
+        try:
+            current = self.grid.currentItem()
+            full = str(current.data(Qt.ItemDataRole.UserRole) or "") \
+                if current is not None else ""
+            starred = bool(full) and full in (self.favorites or set())
+            self.fav_button.setText("★" if starred else "☆")
+            self.fav_button.setToolTip(
+                self._strings.get("library_fav_tip", "Favorite"))
         except Exception:
             pass
 
     def _update_preview(self, *_args) -> None:
         try:
+            self._refresh_star()
             current = self.grid.currentItem()
             if current is None:
                 self.preview_label.setPixmap(placeholder_pixmap(
@@ -210,6 +285,9 @@ class LibraryPanel(QWidget):
             self.search_input.setPlaceholderText(
                 strings.get("library_search", "Search…"))
             self.apply_btn.setText(strings.get("library_apply", "Set"))
+            self.fav_only_checkbox.setText(
+                strings.get("library_fav_only", "Favorites"))
+            self._refresh_star()
             self._update_info()
         except Exception:
             pass

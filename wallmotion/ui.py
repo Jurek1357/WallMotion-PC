@@ -750,18 +750,24 @@ class MainWindow(QMainWindow):
             pass
 
     def _apply_volume_memory(self, path: str) -> None:
-        """Restore remembered mute/volume for a file, if any."""
+        """Restore remembered volume for a file, if any.
+
+        The slider is recalled, but mute is never turned OFF by memory:
+        a checked mute checkbox is the master switch and only the user
+        may uncheck it. (Memory may still turn mute ON.)
+        """
         try:
             entry = volumememory.lookup(self._volumes, path)
             if not entry:
                 return
-            self.mute_checkbox.blockSignals(True)
-            self.mute_checkbox.setChecked(entry["muted"])
-            self.mute_checkbox.blockSignals(False)
             self.volume_slider.blockSignals(True)
             self.volume_slider.setValue(entry["volume"])
             self.volume_slider.blockSignals(False)
             self.volume_value.setText(f"{self.volume_slider.value()}%")
+            if entry["muted"]:
+                self.mute_checkbox.blockSignals(True)
+                self.mute_checkbox.setChecked(True)
+                self.mute_checkbox.blockSignals(False)
         except Exception:
             pass
 

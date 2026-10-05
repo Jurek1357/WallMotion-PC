@@ -8,11 +8,37 @@ leftovers) are cleaned by removing and re-listening.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QLockFile, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 SERVER_NAME = "wallmotion-single-instance"
+LOCK_NAME = "wallmotion-single-instance.lock"
+
+
+def lock_path() -> str:
+    try:
+        return os.path.join(tempfile.gettempdir(), LOCK_NAME)
+    except Exception:
+        return LOCK_NAME
+
+
+def acquire_single_instance_lock() -> QLockFile | None:
+    """Take the app lock. None = another instance is running.
+
+    QLockFile detects dead owners by PID, so a crash never wedges
+    the lock. Keep the returned object alive for the app lifetime.
+    Needs no QApplication.
+    """
+    try:
+        lock = QLockFile(lock_path())
+        if lock.tryLock(0):
+            return lock
+    except Exception:
+        pass
+    return None
 
 
 class InstanceServer(QObject):

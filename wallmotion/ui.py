@@ -1780,16 +1780,22 @@ def main():
             startup_cmd = cli.args_to_command(cli_args)
         except Exception:
             startup_cmd = {}
-    if startup_cmd:
-        # Another instance running? Forward the command and exit.
-        # NOTE: the log is truncated only below, when THIS process
-        # becomes the app - a forwarder must not wipe the running
-        # instance's debug history (it's the file bug reports attach).
-        try:
-            if instance.send_command(startup_cmd):
-                return
-        except Exception:
-            pass
+    # Single instance gate: only one app may run (two writers corrupt
+    # the config and two players fight over the desktop). Dead owners
+    # are detected by PID, so a crash never wedges the lock.
+    app_lock = None
+    try:
+        app_lock = instance.acquire_single_instance_lock()
+    except Exception:
+        app_lock = None
+    if app_lock is None:
+        if startup_cmd:
+            # Another instance runs: forward the command and exit.
+            try:
+                instance.send_command(startup_cmd)
+            except Exception:
+                pass
+        return
     try:
         with open(DEBUG_LOG, "w", encoding="utf-8") as f:
             f.write("=== Live Wallpaper start ===\n")
@@ -1800,6 +1806,7 @@ def main():
     app.setQuitOnLastWindowClosed(False)
     app.setStyleSheet(build_stylesheet("dark"))
     win = MainWindow()
+    win._instance_lock = app_lock
     try:
         server = instance.InstanceServer(win)
         server.command_received.connect(win.handle_remote_command)

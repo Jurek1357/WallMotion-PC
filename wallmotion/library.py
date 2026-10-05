@@ -225,10 +225,11 @@ class LibraryPanel(QWidget):
             full = str(current.data(Qt.ItemDataRole.UserRole) or "")
             if not full:
                 return
+            added = full not in (self.favorites or set())
             self.favorites = toggle_favorite(self.favorites, full)
             try:
                 if callable(self.on_favorites_changed):
-                    self.on_favorites_changed()
+                    self.on_favorites_changed(full, added)
             except Exception:
                 pass
             self._refresh_star()

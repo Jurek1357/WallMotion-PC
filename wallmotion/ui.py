@@ -1636,10 +1636,34 @@ class MainWindow(QMainWindow):
             QSystemTrayIcon.MessageIcon.Information, 2000
         )
 
-    def _on_favorites_changed(self):
-        """Panel favorites changed: sync the shared set, then save."""
+    def _on_favorites_changed(self, path=None, added=None):
+        """Panel favorites changed: merge with disk, then save.
+
+        Merge (not overwrite) so two running instances do not wipe
+        each other's stars: the toggle carries what changed.
+        """
         try:
-            self.favorites = set(self.library_panel.favorites or set())
+            if path:
+                disk = set()
+                try:
+                    if os.path.exists(CONFIG_PATH):
+                        with open(CONFIG_PATH, encoding="utf-8") as f:
+                            disk = {str(p) for p in
+                                    json.load(f).get("favorites", []) if p}
+                except Exception:
+                    pass
+                current = disk | set(self.library_panel.favorites or set())
+                if added:
+                    current.add(str(path))
+                else:
+                    current.discard(str(path))
+                self.favorites = current
+                try:
+                    self.library_panel.favorites = set(current)
+                except Exception:
+                    pass
+            else:
+                self.favorites = set(self.library_panel.favorites or set())
         except Exception:
             pass
         self._save_config()

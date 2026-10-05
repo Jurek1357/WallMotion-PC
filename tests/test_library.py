@@ -173,6 +173,21 @@ class TestFavorites:
         finally:
             dlg.deleteLater()
 
+    def test_toggle_reports_add_remove(self, tmp_path):
+        _make_jpg(tmp_path / "a.jpg")
+        dlg = LibraryDialog(_strings(), str(tmp_path), str(tmp_path))
+        try:
+            panel = dlg.panel
+            calls = []
+            panel.on_favorites_changed = lambda p, a: calls.append((p, a))
+            panel.grid.setCurrentRow(0)
+            panel._toggle_favorite_current()
+            panel._toggle_favorite_current()
+            assert calls[0][1] is True and calls[0][0].endswith("a.jpg")
+            assert calls[1] == (calls[0][0], False)
+        finally:
+            dlg.deleteLater()
+
 
 class TestPreviews:
     def test_placeholder(self):

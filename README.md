@@ -105,6 +105,14 @@ sessions welcome (attach `~/.local/state/wallmotion/debug.log`).
 - YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it, ffmpeg rides along via `imageio-ffmpeg`).
 - No Python needed if you use the ready-made `WallMotion.exe` from [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
 
+### Windows blocked the app?
+Smart App Control may block the unsigned `.exe` ("couldn't verify
+its publisher"). The app is safe (MIT-licensed, source above) – pick one:
+- turn Smart App Control off: Settings → Privacy & Security →
+  Windows Security → App & browser control → Smart App Control → Off,
+- or run from source (`pip install -r requirements.txt`,
+  `python main.py`) – scripts launched by the signed Python are allowed.
+
 ### Contributing & license
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs via
@@ -214,6 +222,17 @@ session vítána (přilož `~/.local/state/wallmotion/debug.log`).
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
 - Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`, ffmpeg se přibalí přes `imageio-ffmpeg`).
 - Bez Pythonu se obejdeš s hotovým `WallMotion.exe` ze záložky [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
+
+### Windows aplikaci zablokoval?
+Smart App Control umí zablokovat nepodepsaný `.exe` („nelze ověřit
+vydavatele"). Appka je bezpečná (MIT licence, zdrojáky výše) – vyber si:
+- Smart App Control vypni: Nastavení → Soukromí a zabezpečení →
+  Zabezpečení Windows → Řízení aplikací a prohlížeče →
+  Inteligentní řízení aplikací → Vypnuto,
+- nebo spusť ze zdrojáků (`pip install -r requirements.txt`,
+  `python main.py`) – skripty puštěné podepsaným Pythonem procházejí.
+
+### Příspěvky a licence
 
 ### Příspěvky a licence
 

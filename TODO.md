@@ -74,6 +74,10 @@ Priorities: **P1** = do first (unblocks everything else), **P2** = next,
   Single-instance forwarding to the running app, weekly update check
   with tray notice.
 - [x] **Per-wallpaper volume memory** — remember mute/volume per file.
+- [ ] **Code signing (Windows)** — Smart App Control blocks the unsigned
+  `.exe` on fresh machines. Options: paid code-signing certificate,
+  and/or submit each release `.exe` to Microsoft malware analysis
+  (free, builds SmartScreen reputation over time).
 
 ## Done
 

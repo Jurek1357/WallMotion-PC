@@ -46,6 +46,10 @@ QWidget#content {{
 QWidget#library {{
     background-color: {t['bg']};
 }}
+QTabWidget {{
+    background-color: {t['bg']};
+    border: none;
+}}
 QTabWidget::pane {{
     border: none;
     background-color: {t['bg']};

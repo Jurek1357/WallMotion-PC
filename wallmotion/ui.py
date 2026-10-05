@@ -426,6 +426,10 @@ class MainWindow(QMainWindow):
         self.rotation_play_btn = QPushButton()
         self.rotation_play_btn.clicked.connect(self._on_rotation_play)
         rot_btn_row.addWidget(self.rotation_play_btn, 1)
+        self.rotation_skip_btn = QPushButton()
+        self.rotation_skip_btn.setObjectName("secondary")
+        self.rotation_skip_btn.clicked.connect(self._on_rotation_skip)
+        rot_btn_row.addWidget(self.rotation_skip_btn, 1)
         self.rotation_clear_btn = QPushButton()
         self.rotation_clear_btn.setObjectName("secondary")
         self.rotation_clear_btn.clicked.connect(self._on_rotation_clear)
@@ -466,6 +470,9 @@ class MainWindow(QMainWindow):
         from wallmotion.webui import media_dir, thumbs_dir
         self.library_panel = LibraryPanel(self.S(), media_dir(), thumbs_dir())
         self.library_panel.file_chosen.connect(self._on_library_apply)
+        self.library_panel.add_rotation_requested.connect(
+            self._on_library_add_rotation)
+        self.library_panel.delete_requested.connect(self._on_library_delete)
         self.library_panel.favorites = set(self.favorites)
         self.library_panel.on_favorites_changed = self._on_favorites_changed
         self.tabs = QTabWidget()
@@ -936,6 +943,7 @@ class MainWindow(QMainWindow):
         self.rotation_shuffle_checkbox.setText(s["rotation_shuffle"])
         self.rotation_add_btn.setText(s["rotation_add"])
         self.rotation_play_btn.setText(s["rotation_play"])
+        self.rotation_skip_btn.setText(s["rotation_skip"])
         self.rotation_clear_btn.setText(s["rotation_clear"])
         self._refresh_rotation_label()
         self.volume_label.setText(s["volume_label"])
@@ -1298,6 +1306,19 @@ class MainWindow(QMainWindow):
             self._refresh_rotation_label()
         except Exception as e:
             debug_log(f"ROTATION play exception: {e!r}")
+
+    def _on_rotation_skip(self):
+        """Jump to the next wallpaper in the rotation list right now."""
+        try:
+            if not self.rotation.files:
+                return
+            path = self.rotation.next_file()
+            if path:
+                self._on_file_chosen(path)
+                self.apply_wallpaper()
+                self._save_config()
+        except Exception as e:
+            debug_log(f"ROTATION skip exception: {e!r}")
 
     def _on_rotation_clear(self):
         self.rotation.clear()
@@ -1845,6 +1866,51 @@ class MainWindow(QMainWindow):
                 self.apply_wallpaper()
         except Exception as e:
             debug_log(f"LIB apply exception: {e!r}")
+
+    def _on_library_add_rotation(self, path: str):
+        """Add the library file to the rotation list."""
+        try:
+            if path and os.path.exists(path):
+                if self.rotation.add(path):
+                    self._save_config()
+                self._refresh_rotation_label()
+        except Exception as e:
+            debug_log(f"LIB rotation exception: {e!r}")
+
+    def _on_library_delete(self, path: str):
+        """Delete a library file (with confirmation)."""
+        try:
+            from wallmotion.library import delete_media_file
+            from wallmotion.webui import media_dir, thumbs_dir
+            if not path or not os.path.exists(path):
+                return
+            name = os.path.basename(path)
+            answer = QMessageBox.question(
+                self, self.S()["library_delete_title"],
+                self.S()["library_delete_text"].format(name=name))
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            if delete_media_file(media_dir(), name, thumbs_dir()):
+                try:
+                    self.rotation.remove(path)
+                except Exception:
+                    pass
+                try:
+                    self.favorites.discard(path)
+                except Exception:
+                    pass
+                try:
+                    if self.selected_path == path:
+                        self.selected_path = None
+                except Exception:
+                    pass
+                self._save_config()
+                try:
+                    self.library_panel.refresh()
+                except Exception:
+                    pass
+        except Exception as e:
+            debug_log(f"LIB delete exception: {e!r}")
 
 
 def main():

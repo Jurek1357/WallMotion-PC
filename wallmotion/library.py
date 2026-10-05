@@ -26,7 +26,12 @@ from PySide6.QtWidgets import (
 )
 
 from wallmotion.i18n import T
-from wallmotion.webui import ensure_thumbnail, format_size, list_media
+from wallmotion.webui import (
+    ensure_thumbnail,
+    format_size,
+    list_media,
+    safe_name,
+)
 
 THUMB_W = 200
 THUMB_H = 130
@@ -83,9 +88,11 @@ def preview_pixmap(kind: str, path: str, thumbs_dir: str | None = None,
 
 
 class LibraryPanel(QWidget):
-    """Thumbnail grid with preview pane. Emits file_chosen(path)."""
+    """Thumbnail grid with preview pane. Emits file actions."""
 
     file_chosen = Signal(str)
+    add_rotation_requested = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(self, strings: dict, media_dir: str,
                  thumbs_dir: str | None = None, parent=None):
@@ -153,6 +160,19 @@ class LibraryPanel(QWidget):
         self.meta_label = QLabel()
         self._style_meta()
         side_layout.addWidget(self.meta_label)
+        self.side_set_btn = QPushButton(strings.get("library_set", "Set"))
+        self.side_set_btn.clicked.connect(self._apply_current)
+        side_layout.addWidget(self.side_set_btn)
+        self.side_add_btn = QPushButton(
+            strings.get("library_add_rotation", "Add"))
+        self.side_add_btn.setObjectName("secondary")
+        self.side_add_btn.clicked.connect(self._add_current_to_rotation)
+        side_layout.addWidget(self.side_add_btn)
+        self.side_del_btn = QPushButton(
+            strings.get("library_delete", "Delete"))
+        self.side_del_btn.setObjectName("secondary")
+        self.side_del_btn.clicked.connect(self._delete_current)
+        side_layout.addWidget(self.side_del_btn)
         side_layout.addStretch(1)
         panes.addWidget(side)
 
@@ -282,6 +302,32 @@ class LibraryPanel(QWidget):
         except Exception:
             pass
 
+    def _selected_path(self) -> str | None:
+        try:
+            current = self.grid.currentItem()
+            if current is None:
+                return None
+            path = str(current.data(Qt.ItemDataRole.UserRole) or "")
+            return path or None
+        except Exception:
+            return None
+
+    def _add_current_to_rotation(self):
+        try:
+            path = self._selected_path()
+            if path:
+                self.add_rotation_requested.emit(path)
+        except Exception:
+            pass
+
+    def _delete_current(self):
+        try:
+            path = self._selected_path()
+            if path:
+                self.delete_requested.emit(path)
+        except Exception:
+            pass
+
     def _style_preview(self) -> None:
         try:
             self.preview_label.setStyleSheet(
@@ -305,12 +351,46 @@ class LibraryPanel(QWidget):
             self.apply_btn.setText(strings.get("library_apply", "Set"))
             self.fav_only_checkbox.setText(
                 strings.get("library_fav_only", "Favorites"))
+            self.side_set_btn.setText(strings.get("library_set", "Set"))
+            self.side_add_btn.setText(
+                strings.get("library_add_rotation", "Add"))
+            self.side_del_btn.setText(strings.get("library_delete", "Delete"))
             self._style_preview()
             self._style_meta()
             self._refresh_star()
             self._update_info()
         except Exception:
             pass
+
+
+def delete_media_file(media_dir: str, name: str,
+                      thumbs_dir: str | None = None) -> bool:
+    """Delete a library file (+ its cached thumbnail). Pure I/O, tested.
+
+    Also prunes the name from callers (rotation/favorites handled by
+    the UI). Returns True when the media file is gone.
+    """
+    try:
+        full = safe_name(media_dir, name)
+        if not full:
+            return False
+        try:
+            if os.path.exists(full):
+                os.remove(full)
+        except Exception:
+            return False
+        if os.path.exists(full):
+            return False
+        try:
+            base = os.path.splitext(os.path.basename(name))[0] + ".jpg"
+            thumb = os.path.join(thumbs_dir or "", base)
+            if thumbs_dir and os.path.exists(thumb):
+                os.remove(thumb)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
 
 
 class LibraryDialog(QDialog):

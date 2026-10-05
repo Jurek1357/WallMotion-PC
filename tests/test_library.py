@@ -189,6 +189,74 @@ class TestFavorites:
             dlg.deleteLater()
 
 
+class TestSideButtons:
+    def _panel(self, tmp_path):
+        _make_jpg(tmp_path / "a.jpg")
+        (tmp_path / "v.mp4").write_bytes(b"x" * 50)
+        from wallmotion.library import LibraryPanel
+        panel = LibraryPanel(_strings(), str(tmp_path), str(tmp_path))
+        panel.grid.setCurrentRow(0)
+        return panel
+
+    def test_add_rotation_signal(self, tmp_path):
+        panel = self._panel(tmp_path)
+        try:
+            received = []
+            panel.add_rotation_requested.connect(received.append)
+            panel._add_current_to_rotation()
+            assert len(received) == 1 and received[0].endswith(".jpg")
+        finally:
+            panel.deleteLater()
+
+    def test_delete_signal(self, tmp_path):
+        panel = self._panel(tmp_path)
+        try:
+            received = []
+            panel.delete_requested.connect(received.append)
+            panel._delete_current()
+            assert len(received) == 1
+        finally:
+            panel.deleteLater()
+
+    def test_no_selection_no_signals(self, tmp_path):
+        _make_jpg(tmp_path / "a.jpg")
+        from wallmotion.library import LibraryPanel
+        panel = LibraryPanel(_strings(), str(tmp_path), str(tmp_path))
+        try:
+            received = []
+            panel.add_rotation_requested.connect(received.append)
+            panel.delete_requested.connect(received.append)
+            panel.grid.setCurrentRow(-1)
+            panel.grid.clearSelection()
+            panel._add_current_to_rotation()
+            panel._delete_current()
+            assert received == []
+        finally:
+            panel.deleteLater()
+
+
+class TestDeleteMediaFile:
+    def test_deletes_file_and_thumb(self, tmp_path):
+        from wallmotion.library import delete_media_file
+        media = tmp_path / "media"
+        thumbs = tmp_path / "thumbs"
+        media.mkdir()
+        thumbs.mkdir()
+        (media / "v.mp4").write_bytes(b"x" * 10)
+        (thumbs / "v.jpg").write_bytes(b"y")
+        assert delete_media_file(str(media), "v.mp4", str(thumbs)) is True
+        assert not (media / "v.mp4").exists()
+        assert not (thumbs / "v.jpg").exists()
+
+    def test_missing_returns_false(self, tmp_path):
+        from wallmotion.library import delete_media_file
+        assert delete_media_file(str(tmp_path), "nope.mp4", None) is False
+
+    def test_traversal_rejected(self, tmp_path):
+        from wallmotion.library import delete_media_file
+        assert delete_media_file(str(tmp_path), "../evil.mp4", None) is False
+
+
 class TestPreviews:
     def test_placeholder(self):
         pix = placeholder_pixmap()

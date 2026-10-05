@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.20] - 2026-10-05
+
+### Added
+- Autostart checkbox (Windows .lnk, Linux .desktop).
+- Follow-system-theme checkbox with live polling.
+- Favorites in the library (star + filter, persisted).
+- Wallpapers auto-apply on launch (autostart friendly).
+
+### Fixed
+- Favorites sync between panel and window.
+- Tab bar and panes follow the light theme.
+
 ## [1.0.19] - 2026-10-02
 
 ### Changed
@@ -204,7 +216,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.19...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.20...HEAD
+[1.0.20]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.20
 [1.0.19]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.19
 [1.0.18]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.18
 [1.0.17]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.17

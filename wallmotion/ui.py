@@ -318,6 +318,14 @@ class MainWindow(QMainWindow):
         yt_row.addWidget(self.yt_button)
         layout.addLayout(yt_row)
 
+        self.yt_progress = QProgressBar()
+        self.yt_progress.setRange(0, 100)
+        self.yt_progress.setValue(0)
+        self.yt_progress.setTextVisible(False)
+        self.yt_progress.setFixedHeight(6)
+        self.yt_progress.setVisible(False)
+        layout.addWidget(self.yt_progress)
+
         # -- downloaded videos folder -----------------------------------
         self.folder_button = QPushButton()
         self.folder_button.setObjectName("secondary")
@@ -439,14 +447,6 @@ class MainWindow(QMainWindow):
         self.status_label.setObjectName("status")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
-
-        self.yt_progress = QProgressBar()
-        self.yt_progress.setRange(0, 100)
-        self.yt_progress.setValue(0)
-        self.yt_progress.setTextVisible(False)
-        self.yt_progress.setFixedHeight(6)
-        self.yt_progress.setVisible(False)
-        layout.addWidget(self.yt_progress)
 
         # Tabs: settings + wallpaper library (Wallpaper-Engine style).
         from wallmotion.library import LibraryPanel

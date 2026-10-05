@@ -1,31 +1,29 @@
-"""Pin-style volume slider: portrait rectangle with a triangle tip.
+"""Plain rectangular volume slider handle.
 
-Qt stylesheets cannot draw the pin shape, so it is painted with
-QPainter: a thin groove (accent fill up to the value) and a handle
-made of a rounded rectangle with a downward triangle whose tip
-touches the groove - like a map pin.
+Qt stylesheets cannot do a custom handle shape, so it is painted with
+QPainter: a thin groove (accent fill up to the value) and a plain
+rounded-rectangle handle centered on the groove.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QSlider, QStyle
 
 from wallmotion.i18n import ACCENT, T
 
 HANDLE_W = 16
-HANDLE_RECT_H = 18
-HANDLE_TIP_H = 8
+HANDLE_H = 22
 GROOVE_H = 6
 
 
 class PinSlider(QSlider):
-    """Horizontal slider with a pin-shaped handle. Drop-in QSlider."""
+    """Horizontal slider with a plain rectangular handle. Drop-in QSlider."""
 
     def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
         super().__init__(orientation, parent)
-        self.setMinimumHeight(HANDLE_RECT_H + HANDLE_TIP_H + 8)
+        self.setMinimumHeight(HANDLE_H + 8)
 
     def _handle_center_x(self) -> int:
         try:
@@ -41,7 +39,7 @@ class PinSlider(QSlider):
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             rect = self.rect()
-            groove_y = rect.height() - 4 - GROOVE_H // 2
+            groove_y = rect.height() // 2
             cx = self._handle_center_x()
 
             # Groove: full bar in border color, filled part in accent.
@@ -56,21 +54,11 @@ class PinSlider(QSlider):
                     HANDLE_W // 2, groove_y - GROOVE_H // 2,
                     cx - HANDLE_W // 2, GROOVE_H, 3, 3)
 
-            # Handle: rounded rectangle with a narrow triangle tip below.
-            top = groove_y - HANDLE_TIP_H - HANDLE_RECT_H
-            left = cx - HANDLE_W // 2
+            # Handle: plain rounded rectangle centered on the groove.
             painter.setBrush(QColor(ACCENT))
-            painter.drawRoundedRect(left, top, HANDLE_W, HANDLE_RECT_H, 5, 5)
-            tip = QPainterPath()
-            tip.moveTo(left + 3, top + HANDLE_RECT_H - 2)
-            tip.lineTo(left + HANDLE_W - 3, top + HANDLE_RECT_H - 2)
-            tip.lineTo(cx, top + HANDLE_RECT_H + HANDLE_TIP_H)
-            tip.closeSubpath()
-            painter.fillPath(tip, QColor(ACCENT))
-            # Small light dot centered in the rectangle.
-            dot_top = top + (HANDLE_RECT_H - 4) // 2
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(cx - 2, dot_top, 4, 4)
+            painter.drawRoundedRect(
+                cx - HANDLE_W // 2, groove_y - HANDLE_H // 2,
+                HANDLE_W, HANDLE_H, 5, 5)
             painter.end()
         except Exception:
             try:

@@ -48,7 +48,7 @@ QWidget#library {{
 }}
 QTabWidget::pane {{
     border: none;
-    background: transparent;
+    background-color: {t['bg']};
 }}
 QTabBar {{
     background: transparent;

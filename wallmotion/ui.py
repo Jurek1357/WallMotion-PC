@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
         self.library_panel = LibraryPanel(self.S(), media_dir(), thumbs_dir())
         self.library_panel.file_chosen.connect(self._on_library_apply)
         self.library_panel.favorites = set(self.favorites)
-        self.library_panel.on_favorites_changed = self._save_config
+        self.library_panel.on_favorites_changed = self._on_favorites_changed
         self.tabs = QTabWidget()
         self.tabs.addTab(content, "")
         self.tabs.addTab(self.library_panel, "")
@@ -1591,6 +1591,23 @@ class MainWindow(QMainWindow):
             QSystemTrayIcon.MessageIcon.Information, 2000
         )
 
+    def _on_favorites_changed(self):
+        """Panel favorites changed: sync the shared set, then save."""
+        try:
+            self.favorites = set(self.library_panel.favorites or set())
+        except Exception:
+            pass
+        self._save_config()
+
+    def restore_last_wallpaper(self):
+        """Re-apply the last wallpaper (autostart / relaunch)."""
+        try:
+            if self.selected_path and os.path.exists(self.selected_path):
+                debug_log(f"RESTORE: re-applying {self.selected_path}")
+                self.apply_wallpaper()
+        except Exception as e:
+            debug_log(f"RESTORE exception: {e!r}")
+
     def handle_remote_command(self, cmd: dict):
         """Apply a CLI / single-instance command to the running app."""
         try:
@@ -1796,6 +1813,13 @@ def main():
         try:
             win.handle_remote_command(startup_cmd)
             win.hide()
+        except Exception:
+            pass
+    else:
+        # Normal launch (incl. autostart): restore the last wallpaper
+        # after the desktop settles.
+        try:
+            QTimer.singleShot(2500, win.restore_last_wallpaper)
         except Exception:
             pass
     try:

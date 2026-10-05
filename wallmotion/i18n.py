@@ -37,7 +37,7 @@ QMainWindow {{
     background-color: {t['bg']};
 }}
 QScrollArea {{
-    background: transparent;
+    background-color: {t['bg']};
     border: none;
 }}
 QWidget#content {{
@@ -51,7 +51,7 @@ QTabWidget::pane {{
     background-color: {t['bg']};
 }}
 QTabBar {{
-    background: transparent;
+    background-color: {t['bg']};
     border: none;
 }}
 QTabBar::tab {{

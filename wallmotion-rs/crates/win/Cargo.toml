@@ -9,7 +9,9 @@ description = "WallMotion Windows render surface: WorkerW discovery and video ca
 name = "wallmotion_win"
 path = "src/lib.rs"
 
-[dependencies]
+# Win32 bindings exist on Windows only; the pure selection math
+# (tested everywhere) must not drag them onto Linux/macOS builds.
+[target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

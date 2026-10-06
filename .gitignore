@@ -17,3 +17,6 @@ AppDir/
 WallMotion.spec
 WallMotion.desktop
 wallmotion.png
+
+# Rust build cache
+target/

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.22] - 2026-10-06
+
+### Added
+- Rotation follows video end (videos play fully, then advance);
+  interval stays for images only.
+- Repeat toggle for rotation (off = stop on the last wallpaper).
+- Play and Skip buttons for the rotation list.
+- Library preview pane: Set / Add to rotation / Delete buttons.
+- Mute checkbox is the master switch (volume memory never unmutes).
+- Download progress bar with percent under the YouTube row; faster
+  failure with Czech messages on throttled networks.
+
+### Fixed
+- Video window state back in `__init__` (was trapped in a handler,
+  broke all playback) + AST regression test.
+
 ## [1.0.21] - 2026-10-05
 
 ### Fixed
@@ -223,7 +239,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.21...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.22...HEAD
+[1.0.22]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.22
 [1.0.21]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.21
 [1.0.20]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.20
 [1.0.19]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.19

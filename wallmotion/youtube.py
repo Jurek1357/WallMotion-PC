@@ -213,6 +213,36 @@ def _ffmpeg_available() -> bool:
     return _ffmpeg_exe() is not None
 
 
+_FFMPEG_OK: bool | None = None
+
+
+def _ffmpeg_works(timeout: float = 10.0) -> bool:
+    """True when the ffmpeg binary actually executes.
+
+    A file that exists but cannot run (blocked download, Smart App
+    Control, corrupt bundle) must NOT select the merged yt-dlp formats
+    - without this check such setups fail with "ffmpeg is not
+    installed" instead of falling back to progressive mp4. Result is
+    cached per process; reset _FFMPEG_OK in tests.
+    """
+    global _FFMPEG_OK
+    try:
+        if _FFMPEG_OK is not None:
+            return _FFMPEG_OK
+        exe = _ffmpeg_exe()
+        if not exe:
+            _FFMPEG_OK = False
+            return False
+        import subprocess
+        proc = subprocess.run([exe, "-version"], capture_output=True,
+                              timeout=timeout)
+        _FFMPEG_OK = proc.returncode == 0
+        return _FFMPEG_OK
+    except Exception:
+        _FFMPEG_OK = False
+        return False
+
+
 # F10 + audio: only H.264/AVC (avc1), max 1080p, always with audio track.
 # MERGED (requires ffmpeg.exe): 1080p merged from separate tracks, AAC first.
 _YT_FORMAT_MERGED = (
@@ -253,7 +283,9 @@ def map_download_error(err: str) -> str:
     NEED_SIGNIN, UNAVAILABLE, TIMEOUT. Anything else passes through.
     """
     text = str(err or "")
-    if "Requested format is not available" in text and not _ffmpeg_available():
+    if "Requested format is not available" in text and not _ffmpeg_works():
+        return "NEED_FFMPEG"
+    if "ffmpeg is not installed" in text:
         return "NEED_FFMPEG"
     if "Sign in to confirm" in text:
         return "NEED_SIGNIN"
@@ -315,7 +347,7 @@ class DownloadWorker(QThread):
                 # a single file with audio is downloaded (progressive,
                 # typically max 720p).
                 "format": (
-                    _YT_FORMAT_MERGED if _ffmpeg_available()
+                    _YT_FORMAT_MERGED if _ffmpeg_works()
                     else _YT_FORMAT_SINGLE
                 ),
                 "outtmpl": os.path.join(YT_DIR, "%(id)s.%(ext)s"),

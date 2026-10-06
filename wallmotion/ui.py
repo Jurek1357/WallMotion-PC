@@ -1266,7 +1266,8 @@ class MainWindow(QMainWindow):
 
     def _restart_rotation_timer(self):
         try:
-            if self.rotation_enabled and len(self.rotation.files) > 0:
+            if (self.rotation_enabled and len(self.rotation.files) > 0
+                    and not self._rotation_follow_video()):
                 self.rotation_timer.start(self.rotation_interval * 1000)
             else:
                 self.rotation_timer.stop()
@@ -1276,6 +1277,16 @@ class MainWindow(QMainWindow):
     def _on_rotation_toggled(self, checked: bool):
         self.rotation_enabled = bool(checked)
         self._save_config()
+        if not self.rotation_enabled:
+            # Back to looping the current video instead of freezing at end.
+            try:
+                for w in self._each_video_window():
+                    try:
+                        w.set_loop(True)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
         self._restart_rotation_timer()
 
     def _on_rotation_settings_changed(self, _index=None):
@@ -1342,6 +1353,37 @@ class MainWindow(QMainWindow):
         self._save_config()
         self._restart_rotation_timer()
         self._refresh_rotation_label()
+
+    def _rotation_follow_video(self) -> bool:
+        """True when the current video chains by end (not by timer).
+
+        Windows only: mpv loops on Linux, so there the timer stays
+        in charge. Images always use the timer.
+        """
+        try:
+            if not self._is_windows:
+                return False
+            if not self.rotation_enabled or len(self.rotation.files) < 2:
+                return False
+            if not self.selected_path:
+                return False
+            return os.path.splitext(self.selected_path)[1].lower() in VIDEO_EXTS
+        except Exception:
+            return False
+
+    def _on_video_ended(self):
+        """A follow-mode video finished: advance like the timer would."""
+        try:
+            if not self.rotation_enabled or len(self.rotation.files) < 2:
+                try:
+                    if self.video_window is not None:
+                        self.video_window.set_loop(True)
+                except Exception:
+                    pass
+                return
+            self._on_rotation_timeout()
+        except Exception as e:
+            debug_log(f"ROTATION end exception: {e!r}")
 
     def _on_rotation_timeout(self):
         try:
@@ -1561,6 +1603,8 @@ class MainWindow(QMainWindow):
                 self.monitor_choice, self.monitors)
             started = 0
             prev_hwnd = None
+            follow = (self.rotation_enabled
+                      and len(self.rotation.files) > 1)
             for i, target in enumerate(targets):
                 window = VideoWallpaperWindow(
                     self.selected_path,
@@ -1569,6 +1613,8 @@ class MainWindow(QMainWindow):
                     auto_pause_fullscreen=self.pause_fs_checkbox.isChecked(),
                     auto_pause_battery=self.pause_batt_checkbox.isChecked(),
                     monitor=target,
+                    loop=not follow if i == 0 else True,
+                    on_end_of_media=self._on_video_ended if follow and i == 0 else None,
                 )
                 if i == 0:
                     window.failed.connect(self._on_video_failed)

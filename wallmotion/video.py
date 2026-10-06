@@ -62,7 +62,8 @@ class VideoWallpaperWindow(QWidget):
     def __init__(self, video_path: str, muted: bool = True, volume: float = 0.3,
                  auto_pause_fullscreen: bool = True,
                  auto_pause_battery: bool = False,
-                 monitor: dict | None = None):
+                 monitor: dict | None = None, loop: bool = True,
+                 on_end_of_media=None):
         super().__init__()
         # No frame, no focus, no activation - must not steal clicks/focus.
         # No layout or children: the whole window is a canvas painted via GDI.
@@ -87,6 +88,10 @@ class VideoWallpaperWindow(QWidget):
         self._autopaused = False
         self._clean_polls = 0
         self._user_paused = False  # manual Pause button (autopause must not override)
+        # Rotation follow: play once and report the end instead of looping.
+        self._loop = bool(loop)
+        self._on_end_of_media = on_end_of_media
+        self._end_fired = False
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -99,13 +104,49 @@ class VideoWallpaperWindow(QWidget):
             self.player.errorOccurred.connect(self._on_player_error)
         except Exception:
             pass
-        # Native infinite loop is enough on its own. A manual restart via
-        # mediaStatusChanged would fight with it and cause repeated file
-        # reopening, so we deliberately do not connect it here.
+        # Native infinite loop is enough on its own - unless rotation
+        # follow mode wants the end reported instead (play once).
+        # A manual restart via mediaStatusChanged would fight with the
+        # loop and cause repeated file reopening, so in loop mode we
+        # deliberately do not connect it at all.
         try:
-            self.player.setLoops(QMediaPlayer.Loops.Infinite)
+            if self._loop:
+                self.player.setLoops(QMediaPlayer.Loops.Infinite)
+            else:
+                self.player.setLoops(1)
+                self.player.mediaStatusChanged.connect(self._on_media_status)
         except Exception:
-            self.player.mediaStatusChanged.connect(self._loop_video)
+            # Ancient Qt without setLoops: manual loop, end reporting
+            # unavailable there (follow mode degrades to looping).
+            try:
+                self.player.mediaStatusChanged.connect(self._loop_video)
+            except Exception:
+                pass
+
+    def set_loop(self, loop: bool) -> None:
+        """Switch looping on/off live (rotation toggled mid-playback)."""
+        try:
+            self._loop = bool(loop)
+            if self._loop:
+                self._end_fired = False
+                self.player.setLoops(QMediaPlayer.Loops.Infinite)
+            else:
+                self.player.setLoops(1)
+        except Exception:
+            pass
+
+    def _on_media_status(self, status) -> None:
+        """Report a finished non-looping video once (rotation follow)."""
+        try:
+            if self._loop or self._end_fired:
+                return
+            if status == QMediaPlayer.MediaStatus.EndOfMedia:
+                self._end_fired = True
+                callback, self._on_end_of_media = self._on_end_of_media, None
+                if callable(callback):
+                    callback()
+        except Exception as e:
+            debug_log(f"END-OF-MEDIA exception: {e!r}")
 
         self._hdc = 0
         self._canvas = 0  # native canvas HWND (WorkerW child, no Qt window)

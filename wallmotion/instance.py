@@ -25,15 +25,15 @@ def lock_path() -> str:
         return LOCK_NAME
 
 
-def acquire_single_instance_lock() -> QLockFile | None:
+def acquire_single_instance_lock(path: str | None = None) -> QLockFile | None:
     """Take the app lock. None = another instance is running.
 
     QLockFile detects dead owners by PID, so a crash never wedges
     the lock. Keep the returned object alive for the app lifetime.
-    Needs no QApplication.
+    Needs no QApplication. The path override exists for tests.
     """
     try:
-        lock = QLockFile(lock_path())
+        lock = QLockFile(path or lock_path())
         if lock.tryLock(0):
             return lock
     except Exception:

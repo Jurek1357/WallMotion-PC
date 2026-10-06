@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-10-06
+
+### Fixed
+- YouTube: ffmpeg is verified to actually execute (blocked binaries
+  fall back to progressive mp4); the merge error maps to a Czech hint.
+- Downloads fail fast with timeouts instead of hanging on throttled
+  networks; new error hints (sign-in, unavailable, timeout).
+
 ## [1.0.22] - 2026-10-06
 
 ### Added
@@ -239,7 +247,8 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.22...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.23...HEAD
+[1.0.23]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.23
 [1.0.22]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.22
 [1.0.21]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.21
 [1.0.20]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.20

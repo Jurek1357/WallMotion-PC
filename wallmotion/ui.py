@@ -66,7 +66,7 @@ from wallmotion.i18n import (
 )
 from wallmotion.linux_video import LinuxVideoWallpaper
 from wallmotion.platform import get_backend
-from wallmotion.rotation import INTERVALS, RotationQueue, format_interval
+from wallmotion.rotation import INTERVALS, RotationQueue
 from wallmotion.slider import PinSlider
 from wallmotion.systemtheme import read_system_theme
 from wallmotion.updatecheck import (
@@ -400,16 +400,6 @@ class MainWindow(QMainWindow):
         self.rotation_checkbox.setChecked(False)
         self.rotation_checkbox.toggled.connect(self._on_rotation_toggled)
         rot_row.addWidget(self.rotation_checkbox)
-        self.rotation_interval_label = QLabel()
-        rot_row.addWidget(self.rotation_interval_label)
-        self.rotation_interval_combo = QComboBox()
-        for seconds in INTERVALS:
-            self.rotation_interval_combo.addItem(
-                format_interval(seconds), seconds)
-        self.rotation_interval_combo.setCurrentIndex(1)
-        self.rotation_interval_combo.currentIndexChanged.connect(
-            self._on_rotation_settings_changed)
-        rot_row.addWidget(self.rotation_interval_combo, 1)
         self.rotation_shuffle_checkbox = QCheckBox()
         self.rotation_shuffle_checkbox.setChecked(False)
         self.rotation_shuffle_checkbox.toggled.connect(
@@ -671,10 +661,6 @@ class MainWindow(QMainWindow):
                     self.rotation_repeat_checkbox.blockSignals(True)
                     self.rotation_repeat_checkbox.setChecked(self.rotation.repeat)
                     self.rotation_repeat_checkbox.blockSignals(False)
-                    idx = list(INTERVALS).index(self.rotation_interval)
-                    self.rotation_interval_combo.blockSignals(True)
-                    self.rotation_interval_combo.setCurrentIndex(idx)
-                    self.rotation_interval_combo.blockSignals(False)
                 except Exception:
                     pass
                 try:
@@ -947,7 +933,6 @@ class MainWindow(QMainWindow):
         self.autostart_checkbox.setText(s["autostart"])
         self.theme_follow_checkbox.setText(s["theme_auto"])
         self.rotation_checkbox.setText(s["rotation_enable"])
-        self.rotation_interval_label.setText(s["rotation_interval"])
         self.rotation_shuffle_checkbox.setText(s["rotation_shuffle"])
         self.rotation_repeat_checkbox.setText(s["rotation_repeat"])
         self.rotation_add_btn.setText(s["rotation_add"])
@@ -1252,10 +1237,15 @@ class MainWindow(QMainWindow):
         return True
 
     def _rotation_interval_seconds(self) -> int:
+        # No interval picker in the UI anymore: images use the stored
+        # value (default 5 min), videos chain by end of playback.
         try:
-            return int(self.rotation_interval_combo.currentData() or INTERVALS[1])
+            seconds = int(self.rotation_interval)
+            if seconds in INTERVALS:
+                return seconds
         except Exception:
-            return INTERVALS[1]
+            pass
+        return INTERVALS[1]
 
     def _refresh_rotation_label(self):
         try:
@@ -1291,7 +1281,6 @@ class MainWindow(QMainWindow):
 
     def _on_rotation_settings_changed(self, _index=None):
         try:
-            self.rotation_interval = self._rotation_interval_seconds()
             self.rotation.set_shuffle(
                 self.rotation_shuffle_checkbox.isChecked())
             self.rotation.repeat = self.rotation_repeat_checkbox.isChecked()

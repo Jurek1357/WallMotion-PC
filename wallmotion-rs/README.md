@@ -10,8 +10,8 @@ Control today.
 | Step | Status |
 |---|---|
 | `core`: platform paths (XDG/Windows) + session detection, tested | ✅ done |
-| Windows WorkerW canvas (`windows` crate, `windows-rs`) | next |
-| Video decode/render via `libmpv` (kills the H.264-only ceiling) | later |
+| `win`: WorkerW discovery + canvas create/z-order, tested (incl. live smoke test) | ✅ done |
+| Video decode/render via `libmpv` (kills the H.264-only ceiling) | next |
 | Linux backends (layer-shell / X11, same matrix as Python) | later |
 | Settings UI shell (Tauri or `egui`) reusing this core | later |
 

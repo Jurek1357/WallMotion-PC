@@ -28,6 +28,7 @@ jobs:
       - name: Build onefile with Nuitka
         run: >-
           python -m nuitka --onefile --windows-console-mode=disable
+          --low-memory
           --output-filename=WallMotion-nuitka.exe
           --windows-icon-from-ico=assets\icon.ico
           --include-data-dir=assets=assets --include-data-dir=locales=locales

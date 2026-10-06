@@ -122,6 +122,7 @@ class VideoWallpaperWindow(QWidget):
                 self.player.mediaStatusChanged.connect(self._loop_video)
             except Exception:
                 pass
+        self._init_canvas_state()
 
     def set_loop(self, loop: bool) -> None:
         """Switch looping on/off live (rotation toggled mid-playback)."""
@@ -148,6 +149,8 @@ class VideoWallpaperWindow(QWidget):
         except Exception as e:
             debug_log(f"END-OF-MEDIA exception: {e!r}")
 
+    def _init_canvas_state(self) -> None:
+        """Zero the canvas/frame counters (called from __init__)."""
         self._hdc = 0
         self._canvas = 0  # native canvas HWND (WorkerW child, no Qt window)
         self._dw = 0  # canvas width in physical pixels (per WorkerW)

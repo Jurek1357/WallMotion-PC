@@ -16,6 +16,37 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
 VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".webm"}
 
 
+def bundle_dir() -> str:
+    """Directory holding bundled data (assets/, locales/).
+
+    PyInstaller onefile: sys._MEIPASS (temp unpack dir). Nuitka onefile
+    and source runs: repository/payload root derived from __file__.
+    Frozen exe directory is the last resort (PyInstaller --onedir style
+    layouts where data sits next to the binary).
+    """
+    try:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return str(meipass)
+    except Exception:
+        pass
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.isdir(os.path.join(root, "assets")):
+            return root
+    except Exception:
+        pass
+    try:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+    except Exception:
+        pass
+    try:
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    except Exception:
+        return ""
+
+
 def debug_log(msg: str) -> None:
     try:
         import datetime
@@ -48,16 +79,14 @@ def app_version() -> str:
 
 
 def _asset_path(name: str) -> str:
-    """Path to a file in assets/ (also works in frozen EXE via _MEIPASS)."""
+    """Path to a file in assets/ (works in frozen EXE and source runs)."""
     try:
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return os.path.join(meipass, "assets", name)
-        # utils.py lives in wallmotion/, assets/ are in the repo root
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(root, "assets", name)
+        base = bundle_dir()
+        if base:
+            return os.path.join(base, "assets", name)
     except Exception:
-        return os.path.join("assets", name)
+        pass
+    return os.path.join("assets", name)
 
 
 def _quiet_ffmpeg(level: int = 8) -> bool:

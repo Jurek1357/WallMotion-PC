@@ -245,6 +245,9 @@ impl eframe::App for App {
             ui.separator();
             ui.label(&self.status);
         });
+        // Keep the loop alive while hidden in the tray: without a
+        // periodic repaint, update() never runs and tray clicks die.
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

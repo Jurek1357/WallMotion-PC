@@ -16,6 +16,8 @@ wallmotion-player = { path = "../player" }
 eframe = "0.31"
 egui = "0.31"
 rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-manifest = "1"

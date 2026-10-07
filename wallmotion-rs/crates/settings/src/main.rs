@@ -11,6 +11,10 @@
 use std::path::PathBuf;
 use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
 
+mod config;
+
+use config::AppConfig;
+
 struct RunningVideo {
     child: std::process::Child,
     ipc: String,
@@ -27,17 +31,27 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
+        let saved = AppConfig::load();
         Self {
-            file: String::new(),
+            file: saved.last_path,
             status: "Pick a video file, then Set as wallpaper.".to_string(),
-            muted: true,
-            volume: 30,
+            muted: saved.muted,
+            volume: saved.volume,
             running: None,
         }
     }
 }
 
 impl App {
+    fn persist(&self) {
+        AppConfig {
+            last_path: self.file.clone(),
+            muted: self.muted,
+            volume: self.volume,
+        }
+        .save();
+    }
+
     fn mpv_bin() -> Option<PathBuf> {
         if let Ok(path) = std::env::var("WALLMOTION_MPV") {
             let p = PathBuf::from(path);
@@ -176,6 +190,7 @@ impl eframe::App for App {
                         .pick_file()
                     {
                         self.file = path.to_string_lossy().into_owned();
+                        self.persist();
                     }
                 }
             });
@@ -190,6 +205,7 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut self.muted, "Mute").changed() {
                     self.apply_mute_volume();
+                    self.persist();
                 }
                 ui.label("Volume:");
                 if ui
@@ -197,6 +213,7 @@ impl eframe::App for App {
                     .changed()
                 {
                     self.apply_mute_volume();
+                    self.persist();
                 }
                 ui.label(format!("{}%", self.volume));
             });

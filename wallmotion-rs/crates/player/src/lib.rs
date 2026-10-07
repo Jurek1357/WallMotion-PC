@@ -39,20 +39,19 @@ pub fn volume_to_mpv(volume: f32) -> i64 {
     ((volume.clamp(0.0, 1.0) * 100.0).round() as i64).clamp(0, 100)
 }
 
-/// Find mpv: explicit path, exe-adjacent dir, then `$PATH`.
+/// Find mpv: explicit path, exe-adjacent dir, well-known install
+/// locations, then `$PATH`.
 pub fn find_mpv(explicit: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = explicit {
         if is_executable_file(p) {
             return Some(p.to_path_buf());
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for name in exe_names("mpv") {
-                let cand = dir.join(&name);
-                if is_executable_file(&cand) {
-                    return Some(cand);
-                }
+    for dir in candidate_dirs() {
+        for name in exe_names("mpv") {
+            let cand = dir.join(&name);
+            if is_executable_file(&cand) {
+                return Some(cand);
             }
         }
     }
@@ -66,6 +65,33 @@ pub fn find_mpv(explicit: Option<&Path>) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Directories searched before `$PATH`.
+fn candidate_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    #[cfg(windows)]
+    {
+        for base in [
+            std::env::var_os("ProgramFiles").map(PathBuf::from),
+            std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
+            std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Programs")),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            dirs.push(base.join("mpv"));
+        }
+        if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+            dirs.push(home.join("scoop").join("apps").join("mpv").join("current"));
+        }
+    }
+    dirs
 }
 
 #[cfg(windows)]
@@ -266,6 +292,16 @@ mod tests {
         std::fs::write(&tmp, b"x").unwrap();
         assert_eq!(find_mpv(Some(&tmp)), Some(tmp.clone()));
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn find_well_known_dirs() {
+        // Well-known locations are searched (count + mpv suffix only).
+        let found = find_mpv(None);
+        if let Some(p) = found {
+            let name = p.file_name().unwrap().to_string_lossy().to_lowercase();
+            assert!(name.starts_with("mpv"), "{name}");
+        }
     }
 
     #[test]

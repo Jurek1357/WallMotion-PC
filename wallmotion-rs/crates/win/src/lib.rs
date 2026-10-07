@@ -5,4 +5,17 @@
 //! everywhere; Win32 calls run on Windows only.
 
 pub mod canvas;
+pub mod wallpaper;
 pub mod workerw;
+
+/// Render backend label for status lines.
+pub fn backend_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "windows WorkerW canvas + mpv"
+    }
+    #[cfg(not(windows))]
+    {
+        "stub (Windows only in this build)"
+    }
+}

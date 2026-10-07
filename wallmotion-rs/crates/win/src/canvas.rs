@@ -188,9 +188,25 @@ pub mod sys {
         }
     }
 
+    /// Primary monitor size (w, h) in current-process pixels.
+    /// Needs DPI awareness for physical pixels (embed the manifest).
+    pub fn primary_size() -> (i32, i32) {
+        unsafe {
+            (
+                GetSystemMetrics(SM_CXSCREEN),
+                GetSystemMetrics(SM_CYSCREEN),
+            )
+        }
+    }
+
     /// Full setup: find WorkerW, create the canvas over (x, y, w, h),
     /// order it below the desktop icons. Mirrors `VideoWallpaperWindow`.
-    pub fn setup_wallpaper_canvas(x: i32, y: i32, w: i32, h: i32) -> Option<WallpaperCanvas> {
+    pub fn setup_wallpaper_canvas(
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) -> Option<WallpaperCanvas> {
         use crate::workerw::sys as ww;
         let progman = ww::progman()?;
         let raised = unsafe {

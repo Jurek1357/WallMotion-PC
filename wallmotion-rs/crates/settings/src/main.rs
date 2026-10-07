@@ -60,14 +60,44 @@ impl App {
         self.status = "Stopped.".to_string();
     }
 
-    fn set_video(&mut self) {
-        use wallmotion_win::canvas::sys as canvas;
+    fn set_wallpaper(&mut self) {
         self.stop_video();
         let path = PathBuf::from(self.file.trim());
         if !path.is_file() {
-            self.status = "Pick an existing video file first.".to_string();
+            self.status = "Pick an existing image or video file first.".to_string();
             return;
         }
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        const IMAGES: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "gif"];
+        if IMAGES.contains(&ext.as_str()) {
+            self.set_image(&path);
+            return;
+        }
+        self.set_video(path);
+    }
+
+    #[cfg(windows)]
+    fn set_image(&mut self, path: &std::path::Path) {
+        use wallmotion_win::{canvas::sys as canvas, wallpaper};
+        let (w, h) = canvas::primary_size();
+        let fitted = wallpaper::fit_image_to_screen(path, w as u32, h as u32);
+        if wallpaper::set_static_wallpaper(&fitted) {
+            self.status = format!("Image fitted to {w}x{h} and set.");
+        } else {
+            self.status = "Could not set the image.".to_string();
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn set_image(&mut self, _path: &std::path::Path) {
+        self.status = "Static images need Windows in this build.".to_string();
+    }
+
+    fn set_video(&mut self, path: PathBuf) {
+        use wallmotion_win::canvas::sys as canvas;
         let mpv = match Self::mpv_bin() {
             Some(p) => p,
             None => {
@@ -139,7 +169,11 @@ impl eframe::App for App {
                 ui.text_edit_singleline(&mut self.file);
                 if ui.button("Browse…").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("video", &["mp4", "mkv", "webm", "avi", "mov"])
+                        .add_filter(
+                            "images & video",
+                            &["jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv",
+                              "webm", "avi", "mov"],
+                        )
                         .pick_file()
                     {
                         self.file = path.to_string_lossy().into_owned();
@@ -148,7 +182,7 @@ impl eframe::App for App {
             });
             ui.horizontal(|ui| {
                 if ui.button("Set as wallpaper").clicked() {
-                    self.set_video();
+                    self.set_wallpaper();
                 }
                 if ui.button("Stop").clicked() {
                     self.stop_video();

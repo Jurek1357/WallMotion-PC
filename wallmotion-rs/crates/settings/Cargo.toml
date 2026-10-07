@@ -1,0 +1,21 @@
+[package]
+name = "wallmotion-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WallMotion native settings window (egui) over the Rust core"
+
+[[bin]]
+name = "wallmotion-settings"
+path = "src/main.rs"
+
+[dependencies]
+wallmotion-core = { path = "../core" }
+wallmotion-win = { path = "../win" }
+wallmotion-player = { path = "../player" }
+eframe = "0.31"
+egui = "0.31"
+rfd = "0.15"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-manifest = "1"

@@ -17,13 +17,21 @@ pub struct CanvasSpec {
     pub layered: bool,
 }
 
+/// A live wallpaper canvas on the desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WallpaperCanvas {
+    pub canvas: isize,
+    pub workerw: isize,
+    pub raised: bool,
+}
+
 #[cfg(windows)]
 pub mod sys {
-    use super::CanvasSpec;
+    use super::{CanvasSpec, WallpaperCanvas};
     use windows::{
         core::w,
         Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
-        Win32::Graphics::Gdi::HBRUSH,
+        Win32::Graphics::Gdi::*,
         Win32::System::LibraryLoader::GetModuleHandleW,
         Win32::UI::WindowsAndMessaging::*,
     };
@@ -42,20 +50,24 @@ pub mod sys {
     /// Register the canvas window class (idempotent). False on failure.
     pub fn ensure_canvas_class() -> bool {
         unsafe {
-            let mut probe: std::mem::MaybeUninit<WNDCLASSW> = std::mem::MaybeUninit::uninit();
-            if GetClassInfoW(None, w!("WallMotionCanvas"), probe.as_mut_ptr()).is_ok() {
-                return true;
-            }
-            let Ok(instance) = GetModuleHandleW(None) else {
+            // NOTE: hInstance must be OUR module, not NULL (NULL only
+            // finds system classes - a NULL probe always "misses", and
+            // re-registration then fails with 1411 ALREADY_EXISTS).
+            let Ok(module) = GetModuleHandleW(None) else {
                 return false;
             };
+            let instance: HINSTANCE = module.into();
+            let mut probe: std::mem::MaybeUninit<WNDCLASSW> = std::mem::MaybeUninit::uninit();
+            if GetClassInfoW(Some(instance), w!("WallMotionCanvas"), probe.as_mut_ptr()).is_ok() {
+                return true;
+            }
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 style: CS_OWNDC,
                 lpfnWndProc: Some(wndproc),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                hInstance: instance.into(),
+                hInstance: instance,
                 hIcon: Default::default(),
                 hCursor: Default::default(),
                 hbrBackground: HBRUSH(std::ptr::null_mut()),
@@ -63,7 +75,9 @@ pub mod sys {
                 lpszClassName: w!("WallMotionCanvas"),
                 hIconSm: Default::default(),
             };
-            RegisterClassExW(&wc) != 0
+            let atom = RegisterClassExW(&wc);
+            atom != 0
+                || GetClassInfoW(Some(instance), w!("WallMotionCanvas"), probe.as_mut_ptr()).is_ok()
         }
     }
 
@@ -87,7 +101,7 @@ pub mod sys {
             } else {
                 HWND(spec.parent as _)
             };
-            let hwnd = CreateWindowExW(
+            let hwnd = match CreateWindowExW(
                 exstyle,
                 w!("WallMotionCanvas"),
                 w!(""),
@@ -98,10 +112,14 @@ pub mod sys {
                 spec.h.max(1),
                 Some(parent),
                 Some(HMENU(std::ptr::null_mut())),
-                Some(HINSTANCE(std::ptr::null_mut())),
                 None,
-            )
-            .ok()?;
+                None,
+            ) {
+                Ok(h) => h,
+                Err(_) => {
+                    return None;
+                }
+            };
             if spec.layered
                 && SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA).is_err()
             {
@@ -138,6 +156,82 @@ pub mod sys {
         place_below(other, canvas)
     }
 
+    /// Paint an animated test pattern (vertical bands). Demo/test only.
+    pub fn paint_test_pattern(hwnd: isize, w: i32, h: i32, frame: u32) -> bool {
+        unsafe {
+            let hdc = GetDC(Some(HWND(hwnd as _)));
+            if hdc.is_invalid() {
+                return false;
+            }
+            let bands = 8;
+            let mut ok = true;
+            for i in 0..bands {
+                let r = (i * 36 + frame as i32 * 5).rem_euclid(256) as u32;
+                let g = (i * 61 + frame as i32 * 3).rem_euclid(256) as u32;
+                let b = (i * 97 + frame as i32 * 7).rem_euclid(256) as u32;
+                let brush = CreateSolidBrush(COLORREF(r | (g << 8) | (b << 16)));
+                if brush.is_invalid() {
+                    ok = false;
+                    break;
+                }
+                let old = SelectObject(hdc, brush.into());
+                let x0 = w * i / bands;
+                let x1 = w * (i + 1) / bands;
+                if PatBlt(hdc, x0, 0, x1 - x0, h, PATCOPY).0 == 0 {
+                    ok = false;
+                }
+                SelectObject(hdc, old);
+                let _ = DeleteObject(brush.into());
+            }
+            ReleaseDC(Some(HWND(hwnd as _)), hdc);
+            ok
+        }
+    }
+
+    /// Full setup: find WorkerW, create the canvas over (x, y, w, h),
+    /// order it below the desktop icons. Mirrors `VideoWallpaperWindow`.
+    pub fn setup_wallpaper_canvas(x: i32, y: i32, w: i32, h: i32) -> Option<WallpaperCanvas> {
+        use crate::workerw::sys as ww;
+        let progman = ww::progman()?;
+        let raised = unsafe {
+            GetWindowLongW(HWND(progman as _), GWL_EXSTYLE) as u32 & WS_EX_NOREDIRECTIONBITMAP.0
+                != 0
+        };
+        let defview = unsafe {
+            FindWindowExW(Some(HWND(progman as _)), None, w!("SHELLDLL_DefView"), None)
+                .ok()
+                .map(|h| h.0 as isize)
+                .unwrap_or(0)
+        };
+        let workerw = ww::get_workerw_handle()?;
+        let (parent, px, py) = if raised {
+            (progman, x, y)
+        } else {
+            // Legacy: coordinates relative to WorkerW.
+            let (wx, wy, _, _) = ww::window_rect(workerw).unwrap_or((0, 0, 0, 0));
+            (workerw, x - wx, y - wy)
+        };
+        let canvas = create_canvas(&CanvasSpec {
+            x: px,
+            y: py,
+            w,
+            h,
+            parent,
+            layered: raised,
+        })?;
+        if raised {
+            if defview != 0 {
+                place_below(canvas, defview);
+            }
+            place_other_below_canvas(workerw, canvas);
+        }
+        Some(WallpaperCanvas {
+            canvas,
+            workerw,
+            raised,
+        })
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -155,6 +249,23 @@ pub mod sys {
             };
             let hwnd = create_canvas(&spec).expect("canvas created");
             assert!(place_below(hwnd, 0) || true); // HWND(0)=desktop: best effort
+            assert!(destroy_canvas(hwnd));
+        }
+
+        #[test]
+        fn smoke_paint_pattern() {
+            let spec = CanvasSpec {
+                x: 0,
+                y: 0,
+                w: 64,
+                h: 64,
+                parent: 0,
+                layered: false,
+            };
+            let hwnd = create_canvas(&spec).expect("canvas created");
+            for frame in 0..3u32 {
+                assert!(paint_test_pattern(hwnd, 64, 64, frame));
+            }
             assert!(destroy_canvas(hwnd));
         }
     }

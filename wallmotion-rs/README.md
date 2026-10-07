@@ -11,9 +11,17 @@ Control today.
 |---|---|
 | `core`: platform paths (XDG/Windows) + session detection, tested | ✅ done |
 | `win`: WorkerW discovery + canvas create/z-order, tested (incl. live smoke test) | ✅ done |
+| `demo`: animated test pattern behind desktop icons (`cargo run -p wallmotion-demo`) | ✅ done |
 | Video decode/render via `libmpv` (kills the H.264-only ceiling) | next |
 | Linux backends (layer-shell / X11, same matrix as Python) | later |
 | Settings UI shell (Tauri or `egui`) reusing this core | later |
+
+## Notes
+
+- GUI binaries need an embedded manifest (DPI awareness + Win10+ OS
+  support): without it, `GetSystemMetrics` reports virtualized sizes
+  and layered `Progman` children fail with error 87. The demo embeds
+  `crates/demo/app.manifest` via `embed-manifest` in `build.rs`.
 
 ## Layout
 

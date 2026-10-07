@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "embed-manifest"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba92c8f4591bf29f89716b45e5f5f56577adbb81426e5620c6e994da7c88bb7a"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -40,6 +46,15 @@ checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 [[package]]
 name = "wallmotion-core"
 version = "0.1.0"
+
+[[package]]
+name = "wallmotion-demo"
+version = "0.1.0"
+dependencies = [
+ "embed-manifest",
+ "wallmotion-win",
+ "windows",
+]
 
 [[package]]
 name = "wallmotion-win"

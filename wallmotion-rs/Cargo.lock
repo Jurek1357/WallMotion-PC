@@ -57,6 +57,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wallmotion-player"
+version = "0.1.0"
+dependencies = [
+ "wallmotion-win",
+ "windows",
+]
+
+[[package]]
 name = "wallmotion-win"
 version = "0.1.0"
 dependencies = [

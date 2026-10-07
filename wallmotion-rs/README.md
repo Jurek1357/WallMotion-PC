@@ -12,9 +12,9 @@ Control today.
 | `core`: platform paths (XDG/Windows) + session detection, tested | ✅ done |
 | `win`: WorkerW discovery + canvas create/z-order, tested (incl. live smoke test) | ✅ done |
 | `demo`: animated test pattern behind desktop icons (`cargo run -p wallmotion-demo`) | ✅ done |
-| Video decode/render via `libmpv` (kills the H.264-only ceiling) | next |
-| Linux backends (layer-shell / X11, same matrix as Python) | later |
-| Settings UI shell (Tauri or `egui`) reusing this core | later |
+| `player`: mpv sidecar in our window (`--wid`) + JSON IPC pause/mute/volume, live-tested | ✅ done |
+| Settings UI shell (Tauri or `egui`) reusing this core | next |
+| Static `libmpv` link instead of the sidecar binary | later |
 
 ## Notes
 

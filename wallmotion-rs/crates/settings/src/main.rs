@@ -12,8 +12,12 @@ use std::path::PathBuf;
 use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
 
 mod config;
+mod instance;
 
 use config::AppConfig;
+
+const TRAY_SHOW_ID: &str = "show";
+const TRAY_QUIT_ID: &str = "quit";
 
 struct RunningVideo {
     child: std::process::Child,
@@ -27,6 +31,7 @@ struct App {
     muted: bool,
     volume: u8,
     running: Option<RunningVideo>,
+    quit_requested: bool,
 }
 
 impl Default for App {
@@ -38,6 +43,7 @@ impl Default for App {
             muted: saved.muted,
             volume: saved.volume,
             running: None,
+            quit_requested: false,
         }
     }
 }
@@ -171,6 +177,25 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Tray menu actions from the icon thread.
+        while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+            match event.id.0.as_str() {
+                TRAY_SHOW_ID => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                }
+                TRAY_QUIT_ID => {
+                    self.quit_requested = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                _ => {}
+            }
+        }
+        // X/red close hides to tray (video keeps playing); only the
+        // tray Quit action lets the close proceed (on_exit stops video).
+        if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("WallMotion (native)");
             ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
@@ -227,7 +252,44 @@ impl eframe::App for App {
     }
 }
 
+fn tray_icon_rgba() -> Vec<u8> {
+    // 32x32 accent tile with a darker border (no asset dependency).
+    let mut buf = vec![0u8; 32 * 32 * 4];
+    for y in 0..32 {
+        for x in 0..32 {
+            let edge = x < 2 || y < 2 || x >= 30 || y >= 30;
+            let (r, g, b) = if edge { (60, 44, 140) } else { (124, 92, 255) };
+            let o = (y * 32 + x) * 4;
+            buf[o] = r;
+            buf[o + 1] = g;
+            buf[o + 2] = b;
+            buf[o + 3] = 255;
+        }
+    }
+    buf
+}
+
+fn build_tray() -> Option<tray_icon::TrayIcon> {
+    use tray_icon::{menu::Menu, Icon, TrayIconBuilder};
+    let menu = Menu::new();
+    let show = tray_icon::menu::MenuItem::with_id(TRAY_SHOW_ID, "Open", true, None);
+    let quit = tray_icon::menu::MenuItem::with_id(TRAY_QUIT_ID, "Quit", true, None);
+    menu.append(&show).ok()?;
+    menu.append(&quit).ok()?;
+    let icon = Icon::from_rgba(tray_icon_rgba(), 32, 32).ok()?;
+    TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_icon(icon)
+        .with_tooltip("WallMotion (native)")
+        .build()
+        .ok()
+}
+
 fn main() {
+    if instance::another_instance_running() {
+        return;
+    }
+    let _tray = build_tray();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([460.0, 340.0])

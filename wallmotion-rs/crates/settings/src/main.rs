@@ -159,10 +159,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("WallMotion (native)");
-            ui.label(format!(
-                "Backend: {}",
-                wallmotion_win::backend_name()
-            ));
+            ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label("Video file:");
@@ -171,8 +168,10 @@ impl eframe::App for App {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter(
                             "images & video",
-                            &["jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv",
-                              "webm", "avi", "mov"],
+                            &[
+                                "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm", "avi",
+                                "mov",
+                            ],
                         )
                         .pick_file()
                     {

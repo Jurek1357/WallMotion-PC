@@ -36,11 +36,7 @@ pub fn cover_crop_rect(
 
 /// Resize `src` with cover-fit to exactly `dst_w` x `dst_h`.
 /// Returns the resized image, or None on degenerate input.
-pub fn cover_fit(
-    img: &image::DynamicImage,
-    dst_w: u32,
-    dst_h: u32,
-) -> Option<image::DynamicImage> {
+pub fn cover_fit(img: &image::DynamicImage, dst_w: u32, dst_h: u32) -> Option<image::DynamicImage> {
     let (sw, sh) = (img.width(), img.height());
     let (sx, sy, cw, ch) = cover_crop_rect(sw, sh, dst_w, dst_h)?;
     let cropped = img.crop_imm(sx, sy, cw, ch);
@@ -78,11 +74,10 @@ pub fn fit_image_to_screen(image_path: &Path, width: u32, height: u32) -> PathBu
 /// Set a static image as the desktop wallpaper (Windows only).
 #[cfg(windows)]
 pub fn set_static_wallpaper(image_path: &Path) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-        SPI_SETDESKWALLPAPER,
-    };
     use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETDESKWALLPAPER,
+    };
     let wide: HSTRING = image_path.to_string_lossy().into_owned().into();
     unsafe {
         SystemParametersInfoW(
@@ -98,9 +93,7 @@ pub fn set_static_wallpaper(image_path: &Path) -> bool {
 /// Current desktop wallpaper path, if readable.
 #[cfg(windows)]
 pub fn get_current_wallpaper() -> Option<String> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPI_GETDESKWALLPAPER,
-    };
+    use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETDESKWALLPAPER};
     unsafe {
         let mut buf = [0u16; 260];
         SystemParametersInfoW(
@@ -121,7 +114,10 @@ mod tests {
 
     #[test]
     fn cover_exact_size() {
-        assert_eq!(cover_crop_rect(1920, 1080, 1920, 1080), Some((0, 0, 1920, 1080)));
+        assert_eq!(
+            cover_crop_rect(1920, 1080, 1920, 1080),
+            Some((0, 0, 1920, 1080))
+        );
     }
 
     #[test]

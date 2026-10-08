@@ -1714,8 +1714,11 @@ fn window_icon() -> Option<egui::IconData> {
 /// Header theme toggle: a painted sun/moon button (font-independent —
 /// the ☀/☾ glyphs are missing from egui's default font).
 fn theme_toggle_button(ui: &mut egui::Ui, current: theme::AppTheme) -> egui::Response {
-    // Same height as the CZ text button next to it: text row + padding.
-    let h = ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0;
+    // Same height as the CZ text button next to it: text row + padding,
+    // floored by interact_size (exactly like egui::Button sizes itself).
+    let sp = ui.spacing().clone();
+    let h = (ui.text_style_height(&egui::TextStyle::Button) + sp.button_padding.y * 2.0)
+        .max(sp.interact_size.y);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, h), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);

@@ -11,8 +11,10 @@
 use std::path::PathBuf;
 use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
 
+mod cli;
 mod config;
 mod instance;
+mod remote;
 
 use config::AppConfig;
 
@@ -66,6 +68,8 @@ struct App {
     auto: wallmotion_core::autopause::AutoPause,
     auto_paused: bool,
     last_poll: std::time::Instant,
+    remote_rx: Option<std::sync::mpsc::Receiver<String>>,
+    pending_start: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -145,11 +149,66 @@ impl Default for App {
             pause_on_fullscreen: saved.pause_on_fullscreen,
             pause_on_battery: saved.pause_on_battery,
             last_poll: std::time::Instant::now(),
+            remote_rx: None,
+            pending_start: false,
         }
     }
 }
 
 impl App {
+    /// Apply a startup CLI command to this fresh instance. Mirrors the
+    /// `startup_cmd` path in Python `main()`: preset file/mute/volume and
+    /// auto-play `--set` on the first frame.
+    fn apply_launch_command(&mut self, cmd: &serde_json::Value) {
+        if let Some(path) = cmd.get("set").and_then(|v| v.as_str()) {
+            if PathBuf::from(path).is_file() {
+                self.file = path.to_string();
+                self.pending_start = true;
+            }
+        }
+        if let Some(muted) = cmd.get("muted").and_then(|v| v.as_bool()) {
+            self.muted = muted;
+        }
+        if let Some(volume) = cmd.get("volume").and_then(|v| v.as_u64()) {
+            self.volume = volume.min(100) as u8;
+        }
+        if cmd.get("set").is_some() || cmd.get("muted").is_some() || cmd.get("volume").is_some() {
+            self.persist();
+        }
+    }
+
+    /// Apply one remote CLI command (JSON line) to the running app.
+    /// Order mirrors Python `handle_remote_command`: set, stop, mute, volume.
+    fn apply_remote_command(&mut self, ctx: &egui::Context, line: &str) {
+        let cmd: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        if !cmd.is_object() {
+            return;
+        }
+        if let Some(path) = cmd.get("set").and_then(|v| v.as_str()) {
+            if PathBuf::from(path).is_file() {
+                self.file = path.to_string();
+                self.set_wallpaper();
+            }
+        }
+        if cmd.get("stop").and_then(|v| v.as_bool()).unwrap_or(false) {
+            self.stop_video();
+        }
+        if let Some(muted) = cmd.get("muted").and_then(|v| v.as_bool()) {
+            self.muted = muted;
+            self.apply_mute_volume();
+        }
+        if let Some(volume) = cmd.get("volume").and_then(|v| v.as_u64()) {
+            self.volume = volume.min(100) as u8;
+            self.apply_mute_volume();
+        }
+        self.persist();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.request_repaint();
+    }
+
     fn persist(&self) {
         AppConfig {
             last_path: self.file.clone(),
@@ -365,6 +424,26 @@ impl eframe::App for App {
             self.quit_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        // Remote CLI commands from later invocations (single instance).
+        let pending: Vec<String> = self
+            .remote_rx
+            .as_ref()
+            .map(|rx| {
+                let mut out = Vec::new();
+                while let Ok(line) = rx.try_recv() {
+                    out.push(line);
+                }
+                out
+            })
+            .unwrap_or_default();
+        for line in pending {
+            self.apply_remote_command(ctx, &line);
+        }
+        // Fresh-start `--set`: auto-play on the first frame.
+        if self.pending_start {
+            self.pending_start = false;
+            self.set_wallpaper();
+        }
         // X/red close hides to tray (video keeps playing); only the
         // tray Quit action lets the close proceed (on_exit stops video).
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
@@ -530,13 +609,35 @@ fn build_tray() -> Option<tray_icon::TrayIcon> {
 }
 
 fn main() {
-    if instance::another_instance_running() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let args = match cli::parse_args(&argv) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}\n{}", cli::usage());
+            std::process::exit(2);
+        }
+    };
+    if args.version {
+        println!("{}", wallmotion_core::VERSION);
         return;
     }
+    let cmd = cli::args_to_command(&args);
+    let action = cli::has_action(&args);
+    if action && remote::send_command(&cmd.to_string()) {
+        println!("Sent to the running instance.");
+        return;
+    }
+    if instance::another_instance_running() {
+        if action {
+            eprintln!("Another instance is running but did not accept the command.");
+        }
+        return;
+    }
+    let remote_rx = remote::start_server();
     let _tray = build_tray();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0, 340.0])
+            .with_inner_size([460.0, 380.0])
             .with_title("WallMotion (native)"),
         ..Default::default()
     };
@@ -545,7 +646,14 @@ fn main() {
         options,
         Box::new(|cc| {
             tray_menu_thread(cc.egui_ctx.clone());
-            Ok(Box::new(App::default()))
+            let mut app = App {
+                remote_rx,
+                ..Default::default()
+            };
+            if action {
+                app.apply_launch_command(&cmd);
+            }
+            Ok(Box::new(app))
         }),
     ) {
         eprintln!("settings error: {e:?}");

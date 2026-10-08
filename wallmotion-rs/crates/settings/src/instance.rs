@@ -42,13 +42,11 @@ fn process_alive(pid: u32) -> bool {
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     unsafe {
-        let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-        else {
+        let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
             return false;
         };
         let mut code = 0u32;
-        let alive = GetExitCodeProcess(handle, &mut code).is_ok()
-            && code == STILL_ACTIVE.0 as u32;
+        let alive = GetExitCodeProcess(handle, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
         let _ = CloseHandle(handle);
         alive
     }

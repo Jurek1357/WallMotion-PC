@@ -5,6 +5,7 @@
 //! `wallmotion/platform/linux.py` so both implementations share
 //! behavior (and tests) while the Rust port grows.
 
+pub mod autopause;
 pub mod paths;
 pub mod session;
 

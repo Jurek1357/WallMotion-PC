@@ -21,8 +21,7 @@ const TRAY_QUIT_ID: &str = "quit";
 
 /// Set by the tray thread on Quit; the UI thread performs the close
 /// (with video cleanup) on its next frame.
-static TRAY_QUIT: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static TRAY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Blocking menu loop: instant response even when the UI thread is
 /// throttled while hidden. Only signals; all Qt/egui work stays on
@@ -62,6 +61,11 @@ struct App {
     paused: bool,
     monitor: String,
     monitors: Vec<MonitorChoice>,
+    pause_on_fullscreen: bool,
+    pause_on_battery: bool,
+    auto: wallmotion_core::autopause::AutoPause,
+    auto_paused: bool,
+    last_poll: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -80,17 +84,43 @@ fn monitor_label(name: &str, rect: (i32, i32, i32, i32), primary: bool) -> Strin
 fn discover_monitors() -> Vec<MonitorChoice> {
     #[cfg(windows)]
     {
-        return wallmotion_win::canvas::sys::list_monitors()
+        wallmotion_win::canvas::sys::list_monitors()
             .into_iter()
             .map(|m| {
                 let label = monitor_label(&m.name, m.rect, m.primary);
-                MonitorChoice { name: m.name, label, rect: Some(m.rect) }
+                MonitorChoice {
+                    name: m.name,
+                    label,
+                    rect: Some(m.rect),
+                }
             })
-            .collect();
+            .collect()
     }
     #[cfg(not(windows))]
     {
         vec![]
+    }
+}
+
+fn poll_fullscreen() -> bool {
+    #[cfg(windows)]
+    {
+        wallmotion_win::autopause::is_fullscreen_app_active()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn poll_battery() -> bool {
+    #[cfg(windows)]
+    {
+        wallmotion_win::autopause::is_on_battery()
+    }
+    #[cfg(not(windows))]
+    {
+        wallmotion_core::autopause::is_on_battery_linux()
     }
 }
 
@@ -107,6 +137,14 @@ impl Default for App {
             paused: false,
             monitor: saved.monitor,
             monitors: discover_monitors(),
+            auto: wallmotion_core::autopause::AutoPause::new(
+                saved.pause_on_fullscreen,
+                saved.pause_on_battery,
+            ),
+            auto_paused: false,
+            pause_on_fullscreen: saved.pause_on_fullscreen,
+            pause_on_battery: saved.pause_on_battery,
+            last_poll: std::time::Instant::now(),
         }
     }
 }
@@ -118,6 +156,8 @@ impl App {
             muted: self.muted,
             volume: self.volume,
             monitor: self.monitor.clone(),
+            pause_on_fullscreen: self.pause_on_fullscreen,
+            pause_on_battery: self.pause_on_battery,
         }
         .save();
     }
@@ -142,18 +182,50 @@ impl App {
             let _ = run.canvas;
         }
         self.paused = false;
+        self.auto_paused = false;
+        self.auto.reset();
         self.status = "Stopped.".to_string();
     }
 
     fn toggle_pause(&mut self) {
         if let Some(run) = &self.running {
             self.paused = !self.paused;
-            ipc_set(&run.ipc, "pause", &IpcValue::Bool(self.paused));
+            let effective = self.paused || self.auto_paused;
+            ipc_set(&run.ipc, "pause", &IpcValue::Bool(effective));
             self.status = if self.paused {
                 "Paused.".to_string()
+            } else if self.auto_paused {
+                "Auto-paused (fullscreen/battery).".to_string()
             } else {
                 "Playing.".to_string()
             };
+        }
+    }
+
+    /// One autopause poll (throttled by the caller). Never overrides the
+    /// manual Pause button; pauses at once, resumes after 2 clean polls.
+    fn autopause_tick(&mut self) {
+        if self.running.is_none() || self.paused {
+            return;
+        }
+        let fullscreen = poll_fullscreen();
+        let battery = poll_battery();
+        match self.auto.tick(fullscreen, battery, self.paused) {
+            Some(true) => {
+                self.auto_paused = true;
+                if let Some(run) = &self.running {
+                    ipc_set(&run.ipc, "pause", &IpcValue::Bool(true));
+                }
+                self.status = "Auto-paused (fullscreen app or battery).".to_string();
+            }
+            Some(false) => {
+                self.auto_paused = false;
+                if let Some(run) = &self.running {
+                    ipc_set(&run.ipc, "pause", &IpcValue::Bool(false));
+                }
+                self.status = "Playing.".to_string();
+            }
+            None => {}
         }
     }
 
@@ -242,7 +314,8 @@ impl App {
                     } else {
                         self.monitor.clone()
                     };
-                    self.status = format!("Playing behind icons ({w}x{h} at {x},{y} on {where_tag}).");
+                    self.status =
+                        format!("Playing behind icons ({w}x{h} at {x},{y} on {where_tag}).");
                     self.running = Some(RunningVideo {
                         child,
                         ipc: opts.ipc_endpoint,
@@ -383,9 +456,35 @@ impl eframe::App for App {
                 }
                 ui.label(format!("{}%", self.volume));
             });
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
+                    .changed()
+                {
+                    self.auto
+                        .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                    self.persist();
+                }
+                if ui
+                    .checkbox(&mut self.pause_on_battery, "Pause on battery")
+                    .changed()
+                {
+                    self.auto
+                        .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                    self.persist();
+                }
+            });
             ui.separator();
             ui.label(&self.status);
         });
+        // Autopause poll (Python POLL_INTERVAL_MS): pause at once, resume
+        // after 2 clean polls. Throttled — update() runs every ~50ms.
+        if self.last_poll.elapsed()
+            >= std::time::Duration::from_millis(wallmotion_core::autopause::POLL_INTERVAL_MS)
+        {
+            self.last_poll = std::time::Instant::now();
+            self.autopause_tick();
+        }
         // Keep the loop alive while hidden in the tray: without a
         // periodic repaint, update() never runs and tray clicks die.
         // 50ms keeps the menu snappy at negligible idle cost.

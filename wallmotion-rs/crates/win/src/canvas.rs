@@ -231,9 +231,9 @@ pub mod sys {
                 let sink = &mut *(lparam.0 as *mut Sink);
                 let mut info: MONITORINFOEXW = std::mem::zeroed();
                 info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-                if GetMonitorInfoW(hmon, &mut info as *mut _ as *mut MONITORINFO).as_bool()
-                {
-                    let end = info.szDevice
+                if GetMonitorInfoW(hmon, &mut info as *mut _ as *mut MONITORINFO).as_bool() {
+                    let end = info
+                        .szDevice
                         .iter()
                         .position(|&c| c == 0)
                         .unwrap_or(info.szDevice.len());

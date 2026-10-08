@@ -4444,6 +4444,7 @@ name = "wallmotion-win"
 version = "0.1.0"
 dependencies = [
  "image",
+ "wallmotion-core",
  "windows 0.61.3",
 ]
 

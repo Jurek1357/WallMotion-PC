@@ -23,6 +23,16 @@ pub struct AppConfig {
     /// Monitor device name (`\\.\DISPLAY1`) or empty for all monitors.
     #[serde(default)]
     pub monitor: String,
+    /// Pause video when a fullscreen app is active (games).
+    #[serde(default = "default_pause_on_fullscreen")]
+    pub pause_on_fullscreen: bool,
+    /// Pause video when running on battery.
+    #[serde(default)]
+    pub pause_on_battery: bool,
+}
+
+fn default_pause_on_fullscreen() -> bool {
+    true
 }
 
 fn default_muted() -> bool {
@@ -40,6 +50,8 @@ impl Default for AppConfig {
             muted: default_muted(),
             volume: default_volume(),
             monitor: String::new(),
+            pause_on_fullscreen: default_pause_on_fullscreen(),
+            pause_on_battery: false,
         }
     }
 }
@@ -91,6 +103,8 @@ mod tests {
             muted: false,
             volume: 70,
             monitor: String::new(),
+            pause_on_fullscreen: true,
+            pause_on_battery: false,
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

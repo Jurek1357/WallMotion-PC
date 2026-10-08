@@ -4,6 +4,7 @@
 //! `wallmotion/video.py`. Pure selection math is unit-tested
 //! everywhere; Win32 calls run on Windows only.
 
+pub mod autopause;
 pub mod canvas;
 pub mod wallpaper;
 pub mod workerw;

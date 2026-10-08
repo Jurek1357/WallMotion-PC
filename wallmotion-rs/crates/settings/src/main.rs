@@ -801,8 +801,13 @@ impl App {
     /// on the left, detail panel (preview, actions) on the right.
     /// Lively-style layout (replaces the old inline row list).
     fn library_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.lib_search).hint_text("Search…"));
+        ui.add(
+            egui::TextEdit::singleline(&mut self.lib_search)
+                .hint_text("Search…")
+                .desired_width(f32::INFINITY),
+        );
+        // Buttons on their own wrapped row: never pushed off-screen.
+        ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut self.lib_fav_only, "Favorites only");
             if ui.button("Refresh").clicked() {
                 self.rescan_library(ctx);
@@ -847,60 +852,75 @@ impl App {
         }
         let mut action: Option<LibAction> = None;
         // Responsive wrapped grid: cards per row follow the window width.
+        // Deterministic grid: columns follow the window width, rows stack
+        // down (horizontal_wrapped overflowed instead of wrapping here).
+        let avail = ui.available_width().max(100.0);
+        let card_w = avail.clamp(100.0, 150.0);
+        let ncols = ((avail / card_w).floor() as usize).max(1);
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    for item in &items {
-                        let selected = self.lib_selected.as_deref() == Some(&item.name);
-                        let stroke = if selected {
-                            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(124, 92, 255))
-                        } else {
-                            egui::Stroke::NONE
-                        };
-                        // Display only: images/labels have hover sense, so the
-                        // card gets its own click area below (single = pick,
-                        // double = set as wallpaper).
-                        let card = egui::Frame::default()
-                            .stroke(stroke)
-                            .inner_margin(4.0)
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.set_width(140.0);
-                                    if let Some(tex) = self.thumbs.get(&item.name) {
-                                        let size = tex.size_vec2();
-                                        let w = 140.0;
-                                        let h = (w * size.y / size.x.max(1.0)).clamp(40.0, 90.0);
-                                        ui.image((tex.id(), egui::vec2(w, h)));
-                                    } else {
-                                        ui.label(match item.kind {
-                                            library::MediaKind::Image => "[img]",
-                                            library::MediaKind::Video => "[vid]",
-                                        });
-                                    }
-                                    let fav = if self.favorites.contains(&item.name) {
-                                        "★ "
-                                    } else {
-                                        ""
-                                    };
-                                    ui.label(
-                                        egui::RichText::new(format!("{fav}{}", item.name)).small(),
-                                    );
-                                });
+                egui::Grid::new("lib_grid")
+                    .num_columns(ncols)
+                    .spacing(egui::vec2(8.0, 8.0))
+                    .show(ui, |ui| {
+                        for (i, item) in items.iter().enumerate() {
+                            ui.vertical(|ui| {
+                                ui.set_width(card_w);
+                                let selected = self.lib_selected.as_deref() == Some(&item.name);
+                                let stroke = if selected {
+                                    egui::Stroke::new(
+                                        2.0_f32,
+                                        egui::Color32::from_rgb(124, 92, 255),
+                                    )
+                                } else {
+                                    egui::Stroke::NONE
+                                };
+                                // Display only: images/labels have hover
+                                // sense, so the card gets its own click area
+                                // below (single = pick, double = set).
+                                let card = egui::Frame::default()
+                                    .stroke(stroke)
+                                    .inner_margin(4.0)
+                                    .show(ui, |ui| {
+                                        let w = (card_w - 16.0).max(60.0);
+                                        if let Some(tex) = self.thumbs.get(&item.name) {
+                                            let size = tex.size_vec2();
+                                            let h =
+                                                (w * size.y / size.x.max(1.0)).clamp(40.0, 90.0);
+                                            ui.image((tex.id(), egui::vec2(w, h)));
+                                        } else {
+                                            ui.label(match item.kind {
+                                                library::MediaKind::Image => "[img]",
+                                                library::MediaKind::Video => "[vid]",
+                                            });
+                                        }
+                                        let fav = if self.favorites.contains(&item.name) {
+                                            "★ "
+                                        } else {
+                                            ""
+                                        };
+                                        ui.label(
+                                            egui::RichText::new(format!("{fav}{}", item.name))
+                                                .small(),
+                                        );
+                                    });
+                                let click = ui.interact(
+                                    card.response.rect,
+                                    ui.make_persistent_id(&item.name),
+                                    egui::Sense::click(),
+                                );
+                                if click.double_clicked() {
+                                    action = Some(LibAction::Set(item.name.clone()));
+                                } else if click.clicked() {
+                                    action = Some(LibAction::Select(item.name.clone()));
+                                }
                             });
-                        let click = ui.interact(
-                            card.response.rect,
-                            ui.make_persistent_id(&item.name),
-                            egui::Sense::click(),
-                        );
-                        if click.double_clicked() {
-                            action = Some(LibAction::Set(item.name.clone()));
-                        } else if click.clicked() {
-                            action = Some(LibAction::Select(item.name.clone()));
+                            if (i + 1) % ncols == 0 {
+                                ui.end_row();
+                            }
                         }
-                    } // for item
-                }); // horizontal_wrapped
+                    });
             }); // ScrollArea grid
         ui.separator();
         // Detail panel for the selected wallpaper.

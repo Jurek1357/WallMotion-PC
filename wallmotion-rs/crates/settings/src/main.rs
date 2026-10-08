@@ -756,6 +756,15 @@ impl App {
                 open_folder(&library::media_dir());
             }
         });
+        ui.label(
+            egui::RichText::new(format!(
+                "{} files · {}",
+                self.library.len(),
+                library::media_dir().to_string_lossy()
+            ))
+            .small()
+            .weak(),
+        );
         let query = self.lib_search.trim().to_lowercase();
         let items: Vec<library::MediaItem> = self
             .library

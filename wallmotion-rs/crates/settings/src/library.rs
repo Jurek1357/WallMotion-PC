@@ -67,9 +67,75 @@ pub fn format_size(size: u64) -> String {
     }
 }
 
-/// Downloads dir holding the library (same as the Python app).
+/// Downloads dir holding the library.
+///
+/// The Python app keeps videos next to its exe (`dist/downloads` frozen,
+/// `downloads/` from sources) while the native exe used to look next to
+/// *its own* exe (`target/release/downloads` in dev) — an empty folder,
+/// so the gallery stayed empty. Resolution order, first hit wins:
+/// 1. `WALLMOTION_DOWNLOADS` env override (must exist),
+/// 2. exe-adjacent `downloads/` when it holds media,
+/// 3. legacy Python spots (`dist/downloads`, `downloads/`) found by
+///    walking up from the exe dir, first one holding media,
+/// 4. first existing dir of the above,
+/// 5. exe-adjacent `downloads/` (fresh users: created on first download).
 pub fn media_dir() -> PathBuf {
-    wallmotion_core::paths::app_dirs().downloads
+    if let Some(p) = std::env::var_os("WALLMOTION_DOWNLOADS") {
+        let p = PathBuf::from(p);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    let local = exe_adjacent_downloads();
+    let mut cands = vec![local.clone()];
+    cands.extend(legacy_download_dirs(&exe_dir()));
+    if let Some(dir) = cands.iter().find(|d| has_media(d)) {
+        return dir.clone();
+    }
+    if let Some(dir) = cands.iter().find(|d| d.is_dir()) {
+        return dir.clone();
+    }
+    local
+}
+
+fn exe_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn exe_adjacent_downloads() -> PathBuf {
+    exe_dir().join("downloads")
+}
+
+/// Legacy Python download spots: `<root>/dist/downloads` (frozen exe)
+/// and `<root>/downloads` (sources), where `<root>` is any ancestor of
+/// `exe` (dev layout: `.../wallpaper_app/wallmotion-rs/target/release`).
+fn legacy_download_dirs(exe: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut anc = Some(exe);
+    for _ in 0..6 {
+        let Some(dir) = anc else { break };
+        for cand in [dir.join("dist").join("downloads"), dir.join("downloads")] {
+            if cand.is_dir() && !out.contains(&cand) {
+                out.push(cand);
+            }
+        }
+        anc = dir.parent();
+    }
+    out
+}
+
+fn has_media(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries.flatten().any(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                e.path().is_file() && kind_of(&name).is_some()
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Cache dir for generated video thumbnails.
@@ -119,18 +185,11 @@ pub fn safe_path(directory: &Path, name: &str) -> Option<PathBuf> {
     Some(full)
 }
 
-/// ffmpeg binary from `PATH`, if any.
+/// ffmpeg binary (exe dir, tools dir or `PATH`), if any.
+/// Shared with the YouTube downloader so installed ffmpeg also
+/// unlocks video thumbnails here.
 pub fn ffmpeg_exe() -> Option<PathBuf> {
-    let name = if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    };
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|p| p.is_file())
-    })
+    crate::youtube::find_ffmpeg()
 }
 
 /// Generate (once) a 320px JPEG thumbnail for a video. Returns the cached
@@ -231,6 +290,51 @@ mod tests {
         assert!(safe_path(&dir, "../a.jpg").is_none());
         assert!(safe_path(&dir, "nope.jpg").is_none());
         assert!(safe_path(&dir, "").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn has_media_detects_files() {
+        let dir = fixture();
+        assert!(has_media(&dir));
+        let empty = std::env::temp_dir().join(format!(
+            "wallmotion-lib-empty-{}",
+            std::sync::atomic::AtomicU64::new(0).fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(!has_media(&empty));
+        assert!(!has_media(Path::new("/definitely/not/here")));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn legacy_dirs_found_by_walking_up() {
+        // Fake dev layout: <tmp>/wallpaper_app/wallmotion-rs/target/release
+        // with videos in <tmp>/wallpaper_app/dist/downloads.
+        let base = std::env::temp_dir().join("wallmotion-lib-legacy");
+        let _ = std::fs::remove_dir_all(&base);
+        let exe = base.join("wallpaper_app/wallmotion-rs/target/release");
+        let legacy = base.join("wallpaper_app/dist/downloads");
+        std::fs::create_dir_all(&exe).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("a.mp4"), b"video").unwrap();
+        let found = legacy_download_dirs(&exe);
+        assert!(found.contains(&legacy));
+        assert!(found.iter().any(|p| has_media(p)));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn env_override_wins() {
+        let dir = fixture();
+        let saved = std::env::var_os("WALLMOTION_DOWNLOADS");
+        std::env::set_var("WALLMOTION_DOWNLOADS", &dir);
+        assert_eq!(media_dir(), dir);
+        match saved {
+            Some(v) => std::env::set_var("WALLMOTION_DOWNLOADS", v),
+            None => std::env::remove_var("WALLMOTION_DOWNLOADS"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

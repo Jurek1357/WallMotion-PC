@@ -52,7 +52,62 @@ fn chrono_stamp() -> String {
 fn show_window(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    #[cfg(windows)]
+    reveal_app_window();
     ctx.request_repaint();
+}
+
+/// Win32 handle of our window, for taskbar-free hiding (X hides the
+/// window from the taskbar while the tray icon keeps running).
+/// eframe has no taskbar toggle, so we hide at the Win32 level while
+/// winit still thinks the window is visible (event loop + tray alive).
+static APP_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(windows)]
+fn find_app_hwnd() -> isize {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let mut title: Vec<u16> = "WallMotion (native)".encode_utf16().collect();
+    title.push(0);
+    unsafe {
+        FindWindowW(
+            windows::core::PCWSTR::null(),
+            windows::core::PCWSTR(title.as_ptr()),
+        )
+        .map(|h| h.0 as isize)
+        .unwrap_or(0)
+    }
+}
+
+/// Hide the window incl. its taskbar button (tray icon stays).
+#[cfg(windows)]
+fn hide_app_window() {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    let raw = APP_HWND.load(std::sync::atomic::Ordering::SeqCst);
+    if raw != 0 {
+        unsafe {
+            let _ = ShowWindow(
+                windows::Win32::Foundation::HWND(raw as *mut std::ffi::c_void),
+                SW_HIDE,
+            );
+        }
+    }
+}
+
+/// Re-show a window hidden with [`hide_app_window`].
+#[cfg(windows)]
+fn reveal_app_window() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+    };
+    let raw = APP_HWND.load(std::sync::atomic::Ordering::SeqCst);
+    if raw != 0 {
+        unsafe {
+            let hwnd = windows::Win32::Foundation::HWND(raw as *mut std::ffi::c_void);
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
 }
 
 /// Polling tray loop: menu events + left-click-to-show. Polling (not
@@ -857,10 +912,16 @@ impl App {
             Some(item) => {
                 let c = &mut *ui;
                 if let Some(tex) = self.thumbs.get(&item.name) {
+                    // Natural aspect, capped width, centered — never
+                    // stretched across the panel (see #preview-stretch).
                     let size = tex.size_vec2();
-                    let w = c.available_width().max(80.0);
-                    let h = (w * size.y / size.x.max(1.0)).clamp(60.0, 220.0);
-                    c.image((tex.id(), egui::vec2(w, h)));
+                    let avail = c.available_width().max(80.0);
+                    let w = avail.min(320.0);
+                    let h = w * size.y / size.x.max(1.0);
+                    c.horizontal(|c| {
+                        c.add_space(((avail - w) / 2.0).max(0.0));
+                        c.image((tex.id(), egui::vec2(w, h)));
+                    });
                 }
                 c.label(egui::RichText::new(&item.name).strong());
                 c.label(
@@ -1164,22 +1225,38 @@ impl eframe::App for App {
             self.pending_start = false;
             self.set_wallpaper();
         }
+        // Cache our HWND once (for taskbar-free hide/reveal).
+        #[cfg(windows)]
+        if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            APP_HWND.store(find_app_hwnd(), std::sync::atomic::Ordering::SeqCst);
+        }
         // Scan the library once on startup (thumbnails need a Context).
         if !self.lib_scanned {
             self.rescan_library(ctx);
         }
         // YouTube worker events (progress, playlist, done, tool installs).
         self.poll_yt_events(ctx);
-        // X/red close minimizes to tray (video keeps playing); only the
-        // tray Quit action lets the close proceed (on_exit stops video).
+        // X/red close hides to tray (video keeps playing, tray icon
+        // stays so the app can be reopened); only the tray Quit action
+        // lets the close proceed (on_exit stops video).
         // NOTE: never Visible(false) here — hidden windows stop receiving
         // frames in winit, the UI loop dies and tray menu goes dead with
-        // it (verified with examples/probe.rs). Minimized windows keep
-        // framing, and the taskbar button stays visible.
+        // it (verified with examples/probe.rs). Instead we hide at the
+        // Win32 level: no taskbar button, event loop untouched.
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
-            debug_log("close requested: minimize to tray");
+            debug_log("close requested: hide to tray");
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            #[cfg(windows)]
+            {
+                if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                    APP_HWND.store(find_app_hwnd(), std::sync::atomic::Ordering::SeqCst);
+                }
+                hide_app_window();
+            }
+            #[cfg(not(windows))]
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
         }
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {

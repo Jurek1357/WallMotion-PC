@@ -681,10 +681,15 @@ impl App {
     /// YouTube section: URL box, tool provisioning, progress, picker.
     fn youtube_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.label("YouTube download:");
-        ui.horizontal(|ui| {
-            ui.label("Link:");
-            let url_entered = ui.text_edit_singleline(&mut self.yt_url).lost_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let url_entered = ui
+            .add(
+                egui::TextEdit::singleline(&mut self.yt_url)
+                    .hint_text("Paste a YouTube link…")
+                    .desired_width(f32::INFINITY),
+            )
+            .lost_focus()
+            && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.horizontal_wrapped(|ui| {
             if self.yt_busy {
                 if ui.button("Cancel").clicked() {
                     youtube::cancel_child(&self.yt_child, &self.yt_cancel);
@@ -708,7 +713,7 @@ impl App {
             ui.label(&self.yt_status);
         }
         // Sidecar tools: one-click install/update so it works out of box.
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             match (&self.ytdlp_path, &self.ytdlp_ver) {
                 (Some(_), Some(v)) => {
                     ui.label(format!("yt-dlp {v}"));
@@ -769,7 +774,7 @@ impl App {
                         ui.checkbox(&mut self.yt_picked[i], title);
                     }
                 });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("Download selected").clicked() {
                     let urls: Vec<String> = self
                         .yt_playlist
@@ -1289,9 +1294,13 @@ impl eframe::App for App {
                 });
                 ui.separator();
                 if self.tab == Tab::Settings {
-                    ui.horizontal(|ui| {
-                        ui.label("Video file:");
-                        ui.text_edit_singleline(&mut self.file);
+                    ui.label("Video file:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.file)
+                            .hint_text("Pick a video or image…")
+                            .desired_width(f32::INFINITY),
+                    );
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("Browse…").clicked() {
                             if let Some(path) = rfd::FileDialog::new()
                                 .add_filter(
@@ -1309,7 +1318,7 @@ impl eframe::App for App {
                             }
                         }
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("Set as wallpaper").clicked() {
                             self.set_wallpaper();
                         }
@@ -1323,7 +1332,7 @@ impl eframe::App for App {
                             }
                         });
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("Monitor:");
                         let current = if self.monitor.is_empty() {
                             "All monitors".to_string()
@@ -1364,7 +1373,7 @@ impl eframe::App for App {
                             self.monitors = discover_monitors();
                         }
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.checkbox(&mut self.muted, "Mute").changed() {
                             self.apply_mute_volume();
                             self.persist();
@@ -1379,7 +1388,7 @@ impl eframe::App for App {
                         }
                         ui.label(format!("{}%", self.volume));
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui
                             .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
                             .changed()
@@ -1399,7 +1408,7 @@ impl eframe::App for App {
                     });
                     ui.separator();
                     ui.label("Rotation playlist:");
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
                             self.last_rotation = std::time::Instant::now();
                             self.persist();
@@ -1435,7 +1444,7 @@ impl eframe::App for App {
                             self.persist();
                         }
                     });
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("Add current").clicked()
                             && PathBuf::from(self.file.trim()).is_file()
                         {

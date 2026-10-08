@@ -16,6 +16,7 @@ mod config;
 mod instance;
 mod library;
 mod remote;
+mod youtube;
 
 use config::AppConfig;
 
@@ -125,6 +126,22 @@ struct App {
     thumbs: std::collections::HashMap<String, egui::TextureHandle>,
     lib_scanned: bool,
     volumes: std::collections::HashMap<String, wallmotion_core::volumememory::VolumeSetting>,
+    // YouTube download (yt-dlp sidecar on a background thread).
+    yt_url: String,
+    yt_status: String,
+    yt_progress: f32,
+    yt_busy: bool,
+    yt_rx: Option<std::sync::mpsc::Receiver<youtube::YtEvent>>,
+    yt_child: youtube::ChildSlot,
+    yt_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    yt_playlist: Vec<wallmotion_core::youtube::PlaylistEntry>,
+    yt_picked: Vec<bool>,
+    yt_queue: std::collections::VecDeque<String>,
+    yt_queue_total: usize,
+    yt_tools_scanned: bool,
+    ytdlp_path: Option<std::path::PathBuf>,
+    ytdlp_ver: Option<String>,
+    ffmpeg_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -242,6 +259,21 @@ impl Default for App {
                 .into_iter()
                 .map(|(k, v)| (k, wallmotion_core::volumememory::VolumeSetting::from(v)))
                 .collect(),
+            yt_url: String::new(),
+            yt_status: String::new(),
+            yt_progress: 0.0,
+            yt_busy: false,
+            yt_rx: None,
+            yt_child: youtube::new_child_slot(),
+            yt_cancel: youtube::new_cancel_flag(),
+            yt_playlist: vec![],
+            yt_picked: vec![],
+            yt_queue: Default::default(),
+            yt_queue_total: 0,
+            yt_tools_scanned: false,
+            ytdlp_path: None,
+            ytdlp_ver: None,
+            ffmpeg_path: None,
         }
     }
 }
@@ -360,6 +392,162 @@ impl App {
         self.last_rotation = std::time::Instant::now();
     }
 
+    /// (Re)detect the yt-dlp/ffmpeg sidecars. Cheap fs checks; called
+    /// once at startup and after every provision/update event.
+    fn rescan_tools(&mut self) {
+        self.ytdlp_path = youtube::find_ytdlp();
+        self.ytdlp_ver = self.ytdlp_path.as_deref().and_then(youtube::ytdlp_version);
+        self.ffmpeg_path = youtube::find_ffmpeg();
+        self.yt_tools_scanned = true;
+    }
+
+    /// Start one download (or a playlist fetch) for the URL in the box.
+    fn start_yt_url(&mut self, ctx: &egui::Context) {
+        use wallmotion_core::youtube as yt;
+        let url = self.yt_url.trim().to_string();
+        if url.is_empty() {
+            self.yt_status = "Paste a YouTube link first.".to_string();
+            return;
+        }
+        if !yt::is_valid_youtube_url(&url) {
+            self.yt_status = "Not a YouTube video/playlist link.".to_string();
+            return;
+        }
+        let Some(exe) = self.ytdlp_path.clone() else {
+            self.yt_status = "yt-dlp not found — click Get yt-dlp below.".to_string();
+            return;
+        };
+        if self.yt_busy {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.yt_rx = Some(rx);
+        self.yt_busy = true;
+        self.yt_progress = 0.0;
+        self.yt_playlist.clear();
+        self.yt_picked.clear();
+        self.yt_cancel = youtube::new_cancel_flag();
+        if yt::is_playlist_url(&url) {
+            self.yt_status = "Loading playlist…".to_string();
+            youtube::spawn_playlist_fetch(exe, url, self.yt_cancel.clone(), tx);
+        } else {
+            self.yt_queue.clear();
+            self.yt_queue_total = 1;
+            self.yt_status = "Downloading 0%".to_string();
+            youtube::spawn_download(
+                exe,
+                url,
+                library::media_dir(),
+                self.ffmpeg_path.clone(),
+                self.yt_child.clone(),
+                self.yt_cancel.clone(),
+                tx,
+            );
+        }
+        ctx.request_repaint();
+    }
+
+    /// Start the next queued playlist item, if any.
+    fn start_next_queued(&mut self, ctx: &egui::Context) {
+        let Some(url) = self.yt_queue.pop_front() else {
+            self.yt_queue_total = 0;
+            return;
+        };
+        let Some(exe) = self.ytdlp_path.clone() else {
+            self.yt_status = "yt-dlp not found — click Get yt-dlp below.".to_string();
+            self.yt_busy = false;
+            return;
+        };
+        let done = self.yt_queue_total - self.yt_queue.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.yt_rx = Some(rx);
+        self.yt_busy = true;
+        self.yt_progress = 0.0;
+        self.yt_cancel = youtube::new_cancel_flag();
+        self.yt_status = format!("Downloading {done}/{} 0%", self.yt_queue_total);
+        youtube::spawn_download(
+            exe,
+            url,
+            library::media_dir(),
+            self.ffmpeg_path.clone(),
+            self.yt_child.clone(),
+            self.yt_cancel.clone(),
+            tx,
+        );
+        ctx.request_repaint();
+    }
+
+    /// Drain YouTube worker events (progress, playlist, done, errors).
+    fn poll_yt_events(&mut self, ctx: &egui::Context) {
+        if !self.yt_tools_scanned {
+            self.rescan_tools();
+        }
+        let events: Vec<youtube::YtEvent> = self
+            .yt_rx
+            .as_ref()
+            .map(|rx| {
+                let mut out = Vec::new();
+                while let Ok(ev) = rx.try_recv() {
+                    out.push(ev);
+                }
+                out
+            })
+            .unwrap_or_default();
+        for ev in events {
+            match ev {
+                youtube::YtEvent::Progress(pct) => {
+                    self.yt_progress = pct;
+                    self.yt_status = if self.yt_queue_total > 1 {
+                        let done = self.yt_queue_total - self.yt_queue.len();
+                        format!("Downloading {done}/{} {pct:.0}%", self.yt_queue_total)
+                    } else {
+                        format!("Downloading {pct:.0}%")
+                    };
+                }
+                youtube::YtEvent::Playlist(entries) => {
+                    self.yt_busy = false;
+                    self.yt_rx = None;
+                    self.yt_picked = vec![true; entries.len()];
+                    self.yt_playlist = entries;
+                    self.yt_status = "Pick videos, then Download selected.".to_string();
+                }
+                youtube::YtEvent::Finished(path) => {
+                    self.yt_busy = false;
+                    self.yt_rx = None;
+                    self.yt_progress = 100.0;
+                    self.yt_status = "Downloaded.".to_string();
+                    self.file = path;
+                    self.set_wallpaper();
+                    self.persist();
+                    self.rescan_library(ctx);
+                    // Playlist queue: continue with the next item.
+                    if !self.yt_queue.is_empty() {
+                        self.start_next_queued(ctx);
+                    } else {
+                        self.yt_queue_total = 0;
+                    }
+                }
+                youtube::YtEvent::Error(code) => {
+                    self.yt_busy = false;
+                    self.yt_rx = None;
+                    self.yt_status = youtube::error_text(&code);
+                    // Playlist queue: skip the broken video, keep going.
+                    if !self.yt_queue.is_empty() {
+                        self.start_next_queued(ctx);
+                    } else {
+                        self.yt_queue_total = 0;
+                    }
+                }
+                youtube::YtEvent::Tool(info) => {
+                    self.yt_busy = false;
+                    self.yt_rx = None;
+                    self.yt_status = info;
+                    self.rescan_tools();
+                }
+            }
+        }
+    }
+
     /// Rescan the downloads folder and (re)build thumbnails. Images load
     /// directly; videos need ffmpeg on PATH (else a text badge is shown).
     fn rescan_library(&mut self, ctx: &egui::Context) {
@@ -409,6 +597,125 @@ impl App {
                 self.set_wallpaper();
             }
             self.persist();
+        }
+    }
+
+    /// YouTube section: URL box, tool provisioning, progress, picker.
+    fn youtube_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.label("YouTube download:");
+        ui.horizontal(|ui| {
+            ui.label("Link:");
+            let url_entered = ui.text_edit_singleline(&mut self.yt_url).lost_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if self.yt_busy {
+                if ui.button("Cancel").clicked() {
+                    youtube::cancel_child(&self.yt_child, &self.yt_cancel);
+                    self.yt_busy = false;
+                    self.yt_rx = None;
+                    self.yt_queue.clear();
+                    self.yt_queue_total = 0;
+                    self.yt_status = "Cancelled.".to_string();
+                }
+            } else if ui.button("Download").clicked() || url_entered {
+                self.start_yt_url(ctx);
+            }
+        });
+        if self.yt_busy && self.yt_progress > 0.0 {
+            ui.add(
+                egui::ProgressBar::new((self.yt_progress / 100.0).clamp(0.0, 1.0))
+                    .show_percentage(),
+            );
+        }
+        if !self.yt_status.is_empty() {
+            ui.label(&self.yt_status);
+        }
+        // Sidecar tools: one-click install/update so it works out of box.
+        ui.horizontal(|ui| {
+            match (&self.ytdlp_path, &self.ytdlp_ver) {
+                (Some(_), Some(v)) => {
+                    ui.label(format!("yt-dlp {v}"));
+                }
+                (Some(_), None) => {
+                    ui.label("yt-dlp found");
+                }
+                (None, _) => {
+                    ui.label("yt-dlp missing");
+                }
+            }
+            if !self.yt_busy {
+                if self.ytdlp_path.is_none() {
+                    if ui.button("Get yt-dlp").clicked() {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.yt_rx = Some(rx);
+                        self.yt_busy = true;
+                        self.yt_progress = 0.0;
+                        self.yt_status = "Downloading yt-dlp…".to_string();
+                        youtube::spawn_provision_ytdlp(tx);
+                        ctx.request_repaint();
+                    }
+                } else if ui.button("Update").clicked() {
+                    if let Some(exe) = self.ytdlp_path.clone() {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.yt_rx = Some(rx);
+                        self.yt_busy = true;
+                        self.yt_progress = 0.0;
+                        self.yt_status = "Updating yt-dlp…".to_string();
+                        youtube::spawn_ytdlp_update(exe, tx);
+                        ctx.request_repaint();
+                    }
+                }
+            }
+            if self.ffmpeg_path.is_some() {
+                ui.label("ffmpeg ok");
+            } else {
+                ui.label("ffmpeg missing (~720p max)");
+                if !self.yt_busy && ui.button("Get ffmpeg").clicked() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.yt_rx = Some(rx);
+                    self.yt_busy = true;
+                    self.yt_progress = 0.0;
+                    self.yt_status = "Downloading ffmpeg (~80 MB)…".to_string();
+                    youtube::spawn_provision_ffmpeg(tx);
+                    ctx.request_repaint();
+                }
+            }
+        });
+        // Playlist picker (titles fetched, nothing downloaded yet).
+        if !self.yt_playlist.is_empty() {
+            let titles: Vec<String> = self.yt_playlist.iter().map(|e| e.title.clone()).collect();
+            ui.label(format!("Playlist ({}):", titles.len()));
+            egui::ScrollArea::vertical()
+                .max_height(140.0)
+                .show(ui, |ui| {
+                    for (i, title) in titles.iter().enumerate() {
+                        ui.checkbox(&mut self.yt_picked[i], title);
+                    }
+                });
+            ui.horizontal(|ui| {
+                if ui.button("Download selected").clicked() {
+                    let urls: Vec<String> = self
+                        .yt_playlist
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.yt_picked.get(*i).copied().unwrap_or(false))
+                        .map(|(_, e)| e.url.clone())
+                        .collect();
+                    if urls.is_empty() {
+                        self.yt_status = "Nothing selected.".to_string();
+                    } else {
+                        self.yt_queue = urls.into_iter().collect();
+                        self.yt_queue_total = self.yt_queue.len();
+                        self.yt_playlist.clear();
+                        self.yt_picked.clear();
+                        self.start_next_queued(ctx);
+                    }
+                }
+                if ui.button("Clear").clicked() {
+                    self.yt_playlist.clear();
+                    self.yt_picked.clear();
+                    self.yt_status.clear();
+                }
+            });
         }
     }
 
@@ -640,6 +947,8 @@ impl eframe::App for App {
         if !self.lib_scanned {
             self.rescan_library(ctx);
         }
+        // YouTube worker events (progress, playlist, done, tool installs).
+        self.poll_yt_events(ctx);
         // X/red close minimizes to tray (video keeps playing); only the
         // tray Quit action lets the close proceed (on_exit stops video).
         // NOTE: never Visible(false) here — hidden windows stop receiving
@@ -652,242 +961,248 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("WallMotion (native)");
-            ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label("Video file:");
-                ui.text_edit_singleline(&mut self.file);
-                if ui.button("Browse…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter(
-                            "images & video",
-                            &[
-                                "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm", "avi",
-                                "mov",
-                            ],
-                        )
-                        .pick_file()
-                    {
-                        self.file = path.to_string_lossy().into_owned();
-                        self.apply_volume_memory();
-                        self.persist();
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Set as wallpaper").clicked() {
-                    self.set_wallpaper();
-                }
-                if ui.button("Stop").clicked() {
-                    self.stop_video();
-                }
-                let pause_label = if self.paused { "Resume" } else { "Pause" };
-                ui.add_enabled_ui(self.running.is_some(), |ui| {
-                    if ui.button(pause_label).clicked() {
-                        self.toggle_pause();
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                ui.label("Monitor:");
-                let current = if self.monitor.is_empty() {
-                    "All monitors".to_string()
-                } else {
-                    self.monitors
-                        .iter()
-                        .find(|m| m.name == self.monitor)
-                        .map(|m| m.label.clone())
-                        .unwrap_or_else(|| self.monitor.clone())
-                };
-                egui::ComboBox::from_id_salt("monitor")
-                    .selected_text(current)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_value(&mut self.monitor, String::new(), "All monitors")
-                            .changed()
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.heading("WallMotion (native)");
+                ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Video file:");
+                    ui.text_edit_singleline(&mut self.file);
+                    if ui.button("Browse…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter(
+                                "images & video",
+                                &[
+                                    "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm",
+                                    "avi", "mov",
+                                ],
+                            )
+                            .pick_file()
                         {
+                            self.file = path.to_string_lossy().into_owned();
+                            self.apply_volume_memory();
                             self.persist();
                         }
-                        for m in self.monitors.clone() {
-                            if ui
-                                .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
-                                .changed()
-                            {
-                                self.persist();
-                            }
-                        }
-                    });
-                if ui.button("Refresh").clicked() {
-                    self.monitors = discover_monitors();
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.muted, "Mute").changed() {
-                    self.apply_mute_volume();
-                    self.persist();
-                }
-                ui.label("Volume:");
-                if ui
-                    .add(egui::Slider::new(&mut self.volume, 0..=100).show_value(false))
-                    .changed()
-                {
-                    self.apply_mute_volume();
-                    self.persist();
-                }
-                ui.label(format!("{}%", self.volume));
-            });
-            ui.horizontal(|ui| {
-                if ui
-                    .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
-                    .changed()
-                {
-                    self.auto
-                        .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                    self.persist();
-                }
-                if ui
-                    .checkbox(&mut self.pause_on_battery, "Pause on battery")
-                    .changed()
-                {
-                    self.auto
-                        .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                    self.persist();
-                }
-            });
-            ui.separator();
-            ui.label("Rotation playlist:");
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
-                    self.last_rotation = std::time::Instant::now();
-                    self.persist();
-                }
-                ui.label("Every:");
-                egui::ComboBox::from_id_salt("rot_interval")
-                    .selected_text(wallmotion_core::rotation::format_interval(
-                        self.rotation_interval,
-                    ))
-                    .show_ui(ui, |ui| {
-                        for &secs in wallmotion_core::rotation::INTERVALS {
-                            if ui
-                                .selectable_value(
-                                    &mut self.rotation_interval,
-                                    secs,
-                                    wallmotion_core::rotation::format_interval(secs),
-                                )
-                                .changed()
-                            {
-                                self.last_rotation = std::time::Instant::now();
-                                self.persist();
-                            }
-                        }
-                    });
-                let mut shuffle = self.rotation.shuffle();
-                if ui.checkbox(&mut shuffle, "Shuffle").changed() {
-                    self.rotation.set_shuffle(shuffle);
-                    self.persist();
-                }
-                let mut repeat = self.rotation.repeat();
-                if ui.checkbox(&mut repeat, "Repeat").changed() {
-                    self.rotation.set_repeat(repeat);
-                    self.persist();
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Add current").clicked() && PathBuf::from(self.file.trim()).is_file() {
-                    self.rotation.add(self.file.trim());
-                    self.persist();
-                }
-                if ui.button("Play").clicked() {
-                    self.rotation_enabled = true;
-                    if let Some(path) = self.rotation.restart() {
-                        self.play_rotation_path(path);
-                    } else {
-                        self.persist();
-                    }
-                }
-                ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
-                    if ui.button("Skip").clicked() {
-                        if let Some(path) = self.rotation.next_file() {
-                            self.play_rotation_path(path);
-                        }
                     }
                 });
-                if ui.button("Clear").clicked() {
-                    self.rotation.clear();
-                    self.rotation_enabled = false;
-                    self.persist();
-                }
-                ui.label(format!("{} files", self.rotation.len()));
-            });
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(format!("Library ({}):", self.library.len()));
-                if ui.button("Refresh").clicked() {
-                    self.rescan_library(ctx);
-                }
-                if ui.button("Open folder").clicked() {
-                    open_folder(&library::media_dir());
-                }
-            });
-            egui::ScrollArea::vertical()
-                .max_height(180.0)
-                .show(ui, |ui| {
-                    let items = self.library.clone();
-                    for item in items {
-                        ui.horizontal(|ui| {
-                            if let Some(tex) = self.thumbs.get(&item.name) {
-                                let size = tex.size_vec2();
-                                let h = 48.0;
-                                let w = h * size.x / size.y.max(1.0);
-                                ui.image((tex.id(), egui::vec2(w, h)));
-                            } else {
-                                ui.label(match item.kind {
-                                    library::MediaKind::Image => "[img]",
-                                    library::MediaKind::Video => "[vid]",
-                                });
+                ui.horizontal(|ui| {
+                    if ui.button("Set as wallpaper").clicked() {
+                        self.set_wallpaper();
+                    }
+                    if ui.button("Stop").clicked() {
+                        self.stop_video();
+                    }
+                    let pause_label = if self.paused { "Resume" } else { "Pause" };
+                    ui.add_enabled_ui(self.running.is_some(), |ui| {
+                        if ui.button(pause_label).clicked() {
+                            self.toggle_pause();
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Monitor:");
+                    let current = if self.monitor.is_empty() {
+                        "All monitors".to_string()
+                    } else {
+                        self.monitors
+                            .iter()
+                            .find(|m| m.name == self.monitor)
+                            .map(|m| m.label.clone())
+                            .unwrap_or_else(|| self.monitor.clone())
+                    };
+                    egui::ComboBox::from_id_salt("monitor")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(&mut self.monitor, String::new(), "All monitors")
+                                .changed()
+                            {
+                                self.persist();
                             }
-                            ui.vertical(|ui| {
-                                ui.label(&item.name);
-                                ui.label(format!(
-                                    "{} · {}",
-                                    item.kind.label(),
-                                    library::format_size(item.size)
-                                ));
-                            });
-                            if ui.button("Use").clicked() {
-                                if let Some(path) =
-                                    library::safe_path(&library::media_dir(), &item.name)
+                            for m in self.monitors.clone() {
+                                if ui
+                                    .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
+                                    .changed()
                                 {
-                                    self.file = path.to_string_lossy().into_owned();
-                                    self.set_wallpaper();
                                     self.persist();
-                                }
-                            }
-                            if ui.button("+Rot").clicked() {
-                                if let Some(path) =
-                                    library::safe_path(&library::media_dir(), &item.name)
-                                {
-                                    self.rotation.add(&path.to_string_lossy());
-                                    self.persist();
-                                }
-                            }
-                            if ui.button("Del").clicked() {
-                                if let Some(path) =
-                                    library::safe_path(&library::media_dir(), &item.name)
-                                {
-                                    let _ = std::fs::remove_file(&path);
-                                    self.rotation.remove(&path.to_string_lossy());
-                                    self.persist();
-                                    self.rescan_library(ctx);
                                 }
                             }
                         });
-                        ui.separator();
+                    if ui.button("Refresh").clicked() {
+                        self.monitors = discover_monitors();
                     }
                 });
-            ui.separator();
-            ui.label(&self.status);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.muted, "Mute").changed() {
+                        self.apply_mute_volume();
+                        self.persist();
+                    }
+                    ui.label("Volume:");
+                    if ui
+                        .add(egui::Slider::new(&mut self.volume, 0..=100).show_value(false))
+                        .changed()
+                    {
+                        self.apply_mute_volume();
+                        self.persist();
+                    }
+                    ui.label(format!("{}%", self.volume));
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
+                        .changed()
+                    {
+                        self.auto
+                            .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                        self.persist();
+                    }
+                    if ui
+                        .checkbox(&mut self.pause_on_battery, "Pause on battery")
+                        .changed()
+                    {
+                        self.auto
+                            .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                        self.persist();
+                    }
+                });
+                ui.separator();
+                ui.label("Rotation playlist:");
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
+                        self.last_rotation = std::time::Instant::now();
+                        self.persist();
+                    }
+                    ui.label("Every:");
+                    egui::ComboBox::from_id_salt("rot_interval")
+                        .selected_text(wallmotion_core::rotation::format_interval(
+                            self.rotation_interval,
+                        ))
+                        .show_ui(ui, |ui| {
+                            for &secs in wallmotion_core::rotation::INTERVALS {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.rotation_interval,
+                                        secs,
+                                        wallmotion_core::rotation::format_interval(secs),
+                                    )
+                                    .changed()
+                                {
+                                    self.last_rotation = std::time::Instant::now();
+                                    self.persist();
+                                }
+                            }
+                        });
+                    let mut shuffle = self.rotation.shuffle();
+                    if ui.checkbox(&mut shuffle, "Shuffle").changed() {
+                        self.rotation.set_shuffle(shuffle);
+                        self.persist();
+                    }
+                    let mut repeat = self.rotation.repeat();
+                    if ui.checkbox(&mut repeat, "Repeat").changed() {
+                        self.rotation.set_repeat(repeat);
+                        self.persist();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Add current").clicked()
+                        && PathBuf::from(self.file.trim()).is_file()
+                    {
+                        self.rotation.add(self.file.trim());
+                        self.persist();
+                    }
+                    if ui.button("Play").clicked() {
+                        self.rotation_enabled = true;
+                        if let Some(path) = self.rotation.restart() {
+                            self.play_rotation_path(path);
+                        } else {
+                            self.persist();
+                        }
+                    }
+                    ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
+                        if ui.button("Skip").clicked() {
+                            if let Some(path) = self.rotation.next_file() {
+                                self.play_rotation_path(path);
+                            }
+                        }
+                    });
+                    if ui.button("Clear").clicked() {
+                        self.rotation.clear();
+                        self.rotation_enabled = false;
+                        self.persist();
+                    }
+                    ui.label(format!("{} files", self.rotation.len()));
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(format!("Library ({}):", self.library.len()));
+                    if ui.button("Refresh").clicked() {
+                        self.rescan_library(ctx);
+                    }
+                    if ui.button("Open folder").clicked() {
+                        open_folder(&library::media_dir());
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        let items = self.library.clone();
+                        for item in items {
+                            ui.horizontal(|ui| {
+                                if let Some(tex) = self.thumbs.get(&item.name) {
+                                    let size = tex.size_vec2();
+                                    let h = 48.0;
+                                    let w = h * size.x / size.y.max(1.0);
+                                    ui.image((tex.id(), egui::vec2(w, h)));
+                                } else {
+                                    ui.label(match item.kind {
+                                        library::MediaKind::Image => "[img]",
+                                        library::MediaKind::Video => "[vid]",
+                                    });
+                                }
+                                ui.vertical(|ui| {
+                                    ui.label(&item.name);
+                                    ui.label(format!(
+                                        "{} · {}",
+                                        item.kind.label(),
+                                        library::format_size(item.size)
+                                    ));
+                                });
+                                if ui.button("Use").clicked() {
+                                    if let Some(path) =
+                                        library::safe_path(&library::media_dir(), &item.name)
+                                    {
+                                        self.file = path.to_string_lossy().into_owned();
+                                        self.set_wallpaper();
+                                        self.persist();
+                                    }
+                                }
+                                if ui.button("+Rot").clicked() {
+                                    if let Some(path) =
+                                        library::safe_path(&library::media_dir(), &item.name)
+                                    {
+                                        self.rotation.add(&path.to_string_lossy());
+                                        self.persist();
+                                    }
+                                }
+                                if ui.button("Del").clicked() {
+                                    if let Some(path) =
+                                        library::safe_path(&library::media_dir(), &item.name)
+                                    {
+                                        let _ = std::fs::remove_file(&path);
+                                        self.rotation.remove(&path.to_string_lossy());
+                                        self.persist();
+                                        self.rescan_library(ctx);
+                                    }
+                                }
+                            });
+                            ui.separator();
+                        }
+                    });
+                ui.separator();
+                self.youtube_section(ui, ctx);
+                ui.separator();
+                ui.label(&self.status);
+            }); // ScrollArea
         });
         // Rotation tick (timer-driven; videos loop, no follow-video mode).
         self.rotation_tick();
@@ -978,7 +1293,7 @@ fn main() {
     ));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0, 560.0])
+            .with_inner_size([480.0, 660.0])
             .with_taskbar(false)
             .with_title("WallMotion (native)"),
         ..Default::default()

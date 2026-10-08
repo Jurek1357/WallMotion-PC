@@ -10,6 +10,7 @@ pub mod paths;
 pub mod rotation;
 pub mod session;
 pub mod volumememory;
+pub mod youtube;
 
 /// Crate version (matches workspace package version).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

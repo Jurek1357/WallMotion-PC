@@ -14,6 +14,7 @@ use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
 mod cli;
 mod config;
 mod instance;
+mod library;
 mod remote;
 
 use config::AppConfig;
@@ -120,6 +121,9 @@ struct App {
     rotation_enabled: bool,
     rotation_interval: u64,
     last_rotation: std::time::Instant,
+    library: Vec<library::MediaItem>,
+    thumbs: std::collections::HashMap<String, egui::TextureHandle>,
+    lib_scanned: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +182,18 @@ fn poll_battery() -> bool {
     }
 }
 
+/// Reveal a folder in the system file manager. Best effort.
+fn open_folder(dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+    }
+}
+
 impl Default for App {
     fn default() -> Self {
         let saved = AppConfig::load();
@@ -217,6 +233,9 @@ impl Default for App {
             rotation_interval: interval,
             last_rotation: std::time::Instant::now(),
             rotation,
+            library: vec![],
+            thumbs: Default::default(),
+            lib_scanned: false,
         }
     }
 }
@@ -301,6 +320,33 @@ impl App {
         self.set_wallpaper();
         self.persist();
         self.last_rotation = std::time::Instant::now();
+    }
+
+    /// Rescan the downloads folder and (re)build thumbnails. Images load
+    /// directly; videos need ffmpeg on PATH (else a text badge is shown).
+    fn rescan_library(&mut self, ctx: &egui::Context) {
+        let dir = library::media_dir();
+        self.library = library::list_media(&dir);
+        self.thumbs.clear();
+        let cache = library::thumbs_dir();
+        for item in &self.library {
+            let full = dir.join(&item.name);
+            let source = match item.kind {
+                library::MediaKind::Image => Some(full),
+                library::MediaKind::Video => library::ensure_video_thumb(&full, &cache),
+            };
+            if let Some(path) = source {
+                if let Some((rgba, w, h)) = library::load_thumb_rgba(&path) {
+                    let img =
+                        egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                    self.thumbs.insert(
+                        item.name.clone(),
+                        ctx.load_texture(&item.name, img, egui::TextureOptions::LINEAR),
+                    );
+                }
+            }
+        }
+        self.lib_scanned = true;
     }
 
     /// One rotation tick. Timer-driven (videos loop, so unlike Python
@@ -550,6 +596,10 @@ impl eframe::App for App {
             self.pending_start = false;
             self.set_wallpaper();
         }
+        // Scan the library once on startup (thumbnails need a Context).
+        if !self.lib_scanned {
+            self.rescan_library(ctx);
+        }
         // X/red close minimizes to tray (video keeps playing); only the
         // tray Quit action lets the close proceed (on_exit stops video).
         // NOTE: never Visible(false) here — hidden windows stop receiving
@@ -730,6 +780,72 @@ impl eframe::App for App {
                 ui.label(format!("{} files", self.rotation.len()));
             });
             ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(format!("Library ({}):", self.library.len()));
+                if ui.button("Refresh").clicked() {
+                    self.rescan_library(ctx);
+                }
+                if ui.button("Open folder").clicked() {
+                    open_folder(&library::media_dir());
+                }
+            });
+            egui::ScrollArea::vertical()
+                .max_height(180.0)
+                .show(ui, |ui| {
+                    let items = self.library.clone();
+                    for item in items {
+                        ui.horizontal(|ui| {
+                            if let Some(tex) = self.thumbs.get(&item.name) {
+                                let size = tex.size_vec2();
+                                let h = 48.0;
+                                let w = h * size.x / size.y.max(1.0);
+                                ui.image((tex.id(), egui::vec2(w, h)));
+                            } else {
+                                ui.label(match item.kind {
+                                    library::MediaKind::Image => "[img]",
+                                    library::MediaKind::Video => "[vid]",
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.label(&item.name);
+                                ui.label(format!(
+                                    "{} · {}",
+                                    item.kind.label(),
+                                    library::format_size(item.size)
+                                ));
+                            });
+                            if ui.button("Use").clicked() {
+                                if let Some(path) =
+                                    library::safe_path(&library::media_dir(), &item.name)
+                                {
+                                    self.file = path.to_string_lossy().into_owned();
+                                    self.set_wallpaper();
+                                    self.persist();
+                                }
+                            }
+                            if ui.button("+Rot").clicked() {
+                                if let Some(path) =
+                                    library::safe_path(&library::media_dir(), &item.name)
+                                {
+                                    self.rotation.add(&path.to_string_lossy());
+                                    self.persist();
+                                }
+                            }
+                            if ui.button("Del").clicked() {
+                                if let Some(path) =
+                                    library::safe_path(&library::media_dir(), &item.name)
+                                {
+                                    let _ = std::fs::remove_file(&path);
+                                    self.rotation.remove(&path.to_string_lossy());
+                                    self.persist();
+                                    self.rescan_library(ctx);
+                                }
+                            }
+                        });
+                        ui.separator();
+                    }
+                });
+            ui.separator();
             ui.label(&self.status);
         });
         // Rotation tick (timer-driven; videos loop, no follow-video mode).
@@ -821,7 +937,7 @@ fn main() {
     ));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0, 440.0])
+            .with_inner_size([460.0, 560.0])
             .with_taskbar(false)
             .with_title("WallMotion (native)"),
         ..Default::default()

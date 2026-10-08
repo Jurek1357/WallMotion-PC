@@ -791,10 +791,12 @@ impl App {
             ToggleFav(String),
         }
         let mut action: Option<LibAction> = None;
-        ui.columns(2, |cols| {
-            egui::ScrollArea::vertical()
-                .max_height(380.0)
-                .show(&mut cols[0], |ui| {
+        // Responsive wrapped grid: cards per row follow the window width.
+        egui::ScrollArea::vertical()
+            .max_height(300.0)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     for item in &items {
                         let selected = self.lib_selected.as_deref() == Some(&item.name);
                         let stroke = if selected {
@@ -802,102 +804,102 @@ impl App {
                         } else {
                             egui::Stroke::NONE
                         };
-                        let mut clicked = false;
-                        egui::Frame::default()
+                        // Display only: images/labels have hover sense, so the
+                        // card gets its own click area below (single = pick,
+                        // double = set as wallpaper).
+                        let card = egui::Frame::default()
                             .stroke(stroke)
                             .inner_margin(4.0)
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
+                                    ui.set_width(140.0);
                                     if let Some(tex) = self.thumbs.get(&item.name) {
                                         let size = tex.size_vec2();
                                         let w = 140.0;
                                         let h = (w * size.y / size.x.max(1.0)).clamp(40.0, 90.0);
-                                        if ui.image((tex.id(), egui::vec2(w, h))).clicked() {
-                                            clicked = true;
-                                        }
+                                        ui.image((tex.id(), egui::vec2(w, h)));
                                     } else {
-                                        let badge = match item.kind {
+                                        ui.label(match item.kind {
                                             library::MediaKind::Image => "[img]",
                                             library::MediaKind::Video => "[vid]",
-                                        };
-                                        if ui.button(badge).clicked() {
-                                            clicked = true;
-                                        }
+                                        });
                                     }
                                     let fav = if self.favorites.contains(&item.name) {
                                         "★ "
                                     } else {
                                         ""
                                     };
-                                    if ui
-                                        .label(
-                                            egui::RichText::new(format!("{fav}{}", item.name))
-                                                .small(),
-                                        )
-                                        .clicked()
-                                    {
-                                        clicked = true;
-                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!("{fav}{}", item.name)).small(),
+                                    );
                                 });
                             });
-                        if clicked {
+                        let click = ui.interact(
+                            card.response.rect,
+                            ui.make_persistent_id(&item.name),
+                            egui::Sense::click(),
+                        );
+                        if click.double_clicked() {
+                            action = Some(LibAction::Set(item.name.clone()));
+                        } else if click.clicked() {
                             action = Some(LibAction::Select(item.name.clone()));
                         }
-                    }
-                });
-            // Detail panel for the selected wallpaper.
-            let detail: Option<library::MediaItem> = self
-                .lib_selected
-                .as_ref()
-                .and_then(|sel| self.library.iter().find(|it| &it.name == sel).cloned());
-            match detail {
-                Some(item) => {
-                    let c = &mut cols[1];
-                    if let Some(tex) = self.thumbs.get(&item.name) {
-                        let size = tex.size_vec2();
-                        let w = c.available_width().max(80.0);
-                        let h = (w * size.y / size.x.max(1.0)).clamp(60.0, 220.0);
-                        c.image((tex.id(), egui::vec2(w, h)));
-                    }
-                    c.label(egui::RichText::new(&item.name).strong());
-                    c.label(
-                        egui::RichText::new(format!(
-                            "{} · {}",
-                            item.kind.label(),
-                            library::format_size(item.size)
-                        ))
-                        .small(),
-                    );
-                    let is_fav = self.favorites.contains(&item.name);
-                    if c.button(if is_fav {
-                        "★ Favorited"
-                    } else {
-                        "☆ Favorite"
-                    })
-                    .clicked()
-                    {
-                        action = Some(LibAction::ToggleFav(item.name.clone()));
-                    }
-                    if c.add_sized(
-                        egui::vec2(c.available_width().max(60.0), 0.0),
-                        egui::Button::new("Set wallpaper"),
-                    )
-                    .clicked()
-                    {
-                        action = Some(LibAction::Set(item.name.clone()));
-                    }
-                    if c.button("Add to rotation").clicked() {
-                        action = Some(LibAction::AddRot(item.name.clone()));
-                    }
-                    if c.button("Delete").clicked() {
-                        action = Some(LibAction::Delete(item.name.clone()));
-                    }
+                    } // for item
+                }); // horizontal_wrapped
+            }); // ScrollArea grid
+        ui.separator();
+        // Detail panel for the selected wallpaper.
+        let detail: Option<library::MediaItem> = self
+            .lib_selected
+            .as_ref()
+            .and_then(|sel| self.library.iter().find(|it| &it.name == sel).cloned());
+        match detail {
+            Some(item) => {
+                let c = &mut *ui;
+                if let Some(tex) = self.thumbs.get(&item.name) {
+                    let size = tex.size_vec2();
+                    let w = c.available_width().max(80.0);
+                    let h = (w * size.y / size.x.max(1.0)).clamp(60.0, 220.0);
+                    c.image((tex.id(), egui::vec2(w, h)));
                 }
-                None => {
-                    cols[1].label("Pick a wallpaper on the left.");
+                c.label(egui::RichText::new(&item.name).strong());
+                c.label(
+                    egui::RichText::new(format!(
+                        "{} · {}",
+                        item.kind.label(),
+                        library::format_size(item.size)
+                    ))
+                    .small(),
+                );
+                let is_fav = self.favorites.contains(&item.name);
+                if c.button(if is_fav {
+                    "★ Favorited"
+                } else {
+                    "☆ Favorite"
+                })
+                .clicked()
+                {
+                    action = Some(LibAction::ToggleFav(item.name.clone()));
+                }
+                if c.add_sized(
+                    egui::vec2(c.available_width().max(60.0), 0.0),
+                    egui::Button::new("Set wallpaper"),
+                )
+                .clicked()
+                {
+                    action = Some(LibAction::Set(item.name.clone()));
+                }
+                if c.button("Add to rotation").clicked() {
+                    action = Some(LibAction::AddRot(item.name.clone()));
+                }
+                if c.button("Delete").clicked() {
+                    action = Some(LibAction::Delete(item.name.clone()));
                 }
             }
-        });
+            None => {
+                ui.label("Pick a wallpaper above (double-click sets it).");
+            }
+        }
         match action {
             Some(LibAction::Select(name)) => {
                 self.lib_selected = Some(name);
@@ -1173,7 +1175,7 @@ impl eframe::App for App {
         // NOTE: never Visible(false) here — hidden windows stop receiving
         // frames in winit, the UI loop dies and tray menu goes dead with
         // it (verified with examples/probe.rs). Minimized windows keep
-        // framing, and with_taskbar(false) keeps the taskbar clean.
+        // framing, and the taskbar button stays visible.
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
             debug_log("close requested: minimize to tray");
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1489,7 +1491,6 @@ fn main() {
     ));
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([480.0, 660.0])
-        .with_taskbar(false)
         .with_title("WallMotion (native)");
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);

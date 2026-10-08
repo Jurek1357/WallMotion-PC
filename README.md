@@ -19,14 +19,13 @@ A lightweight Wallpaper Engine alternative for **Windows 10/11**:
 
 ### Native app (beta, ships from v1.1.0)
 
-[Releases](https://github.com/Jurek1357/WallMotion-PC/releases) contain
-two exes sharing one library folder and one config:
-
-- **WallMotion.exe** – the classic Python app above (full features).
-- **WallMotion-Settings.exe** – the native Rust rewrite (~28 MB, no
-  Python, no console popups): tabbed window (**Settings** +
-  **Wallpaper library**, Lively-style grid with search, favorites and
-  detail panel), CZ/EN switch, light/dark theme + follow-system toggle,
+[Releases](https://github.com/Jurek1357/WallMotion-PC/releases) ship
+**WallMotion-Settings.exe** (the classic Python `WallMotion.exe` stays
+available in older releases and in the sources) — the native Rust
+rewrite (~28 MB, no Python, no console popups): tabbed window
+(**Settings** + **Wallpaper library**, Lively-style grid with search,
+favorites and detail panel), CZ/EN switch, light/dark theme +
+follow-system toggle,
   YouTube downloads with one-click yt-dlp/ffmpeg setup, playlist picker,
   per-monitor selection, rotation playlist, per-wallpaper volume memory,
   pause on fullscreen/battery, CLI (`--set/--stop/--mute/--volume`),
@@ -162,13 +161,11 @@ Lehká náhrada Wallpaper Engine pro **Windows 10/11**:
 
 ### Nativní apka (beta, v releasích od v1.1.0)
 
-V [Releases](https://github.com/Jurek1357/WallMotion-PC/releases) jsou
-dva exe soubory se společnou složkou knihovny a jedním configem:
-
-- **WallMotion.exe** – klasická Python apka výše (plná funkčnost).
-- **WallMotion-Settings.exe** – nativní přepis v Rustu (cca 28 MB, bez
-  Pythonu, bez vyskakujících konzolí): okno se záložkami (**Nastavení** +
-  **Knihovna tapet**, mřížka ala Lively s hledáním, oblíbenými a
+V [Releases](https://github.com/Jurek1357/WallMotion-PC/releases) je
+**WallMotion-Settings.exe** (klasické Python `WallMotion.exe` zůstává
+ve starších releasích a ve zdrojácích) – nativní přepis v Rustu
+(cca 28 MB, bez Pythonu, bez vyskakujících konzolí): okno se záložkami
+(**Nastavení** + **Knihovna tapet**, mřížka ala Lively s hledáním, oblíbenými a
   detailem), přepínač CZ/EN, světlý/tmavý motiv + následování systému,
   stahování z YouTube s instalací yt-dlp/ffmpeg na jedno kliknutí,
   výběr playlistu, výběr monitoru, rotace, paměť hlasitosti na soubor,

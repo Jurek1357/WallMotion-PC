@@ -8,33 +8,6 @@ permissions:
   contents: write
 
 jobs:
-  build-exe:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt pyinstaller
-
-      - name: Write version file
-        run: echo "${GITHUB_REF_NAME}" > assets\VERSION
-
-      - name: Build exe
-        run: >-
-          python -m PyInstaller --onefile --windowed --name WallMotion
-          --icon assets\icon.ico --add-data "assets;assets" --add-data "locales;locales" --noconfirm main.py
-
-      - name: Upload exe artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: WallMotion-exe
-          path: dist/WallMotion.exe
-
   build-rs:
     runs-on: windows-latest
     steps:
@@ -57,7 +30,7 @@ jobs:
           path: WallMotion-Settings.exe
 
   publish:
-    needs: [build-exe, build-rs]
+    needs: [build-rs]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -72,13 +45,6 @@ jobs:
           files: release-assets/*
           generate_release_notes: true
           body: |
-            Two apps in this release, sharing one library and config:
-
-            - **WallMotion.exe** — the classic Python app (full features).
-            - **WallMotion-Settings.exe** — the new native beta: no installer,
-              no console popups, CZ/EN, light/dark + follow-system, tabs with
-              a Lively-style wallpaper library, YouTube downloads with
-              one-click yt-dlp/ffmpeg setup. Needs `mpv` on PATH for video
-              wallpapers (same as before).
-
-            Copy both exes next to each other and run either one.
+            The native WallMotion app (beta) — no Python, no installer.
+            Needs **mpv on PATH** for video wallpapers. The classic Python
+            app stays available in older releases and in the sources.

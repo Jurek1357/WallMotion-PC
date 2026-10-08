@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
+### Added
+- Native `WallMotion-Settings.exe` beta, shipped next to the classic
+  app in every release (no Python, no console popups, logo + tray icon).
+- CZ/EN switch, light/dark theme + follow-system toggle, brand styling
+  (logo header, pill tabs, accent buttons).
+- Tabbed wallpaper library, Lively-style: search, favorites (+filter),
+  responsive grid, detail panel (Set / Add to rotation / Delete),
+  double-click to set. Shares the folder and config with the Python app.
+- YouTube downloads in the native app via a standalone yt-dlp sidecar
+  with one-click install/update and one-click ffmpeg setup; playlist
+  picker with queue, progress bar, Cancel.
+- Per-wallpaper volume memory, per-monitor selection, rotation
+  playlist, pause on fullscreen/battery, CLI (`--set/--stop/--mute/
+  --volume`), hide-to-tray on X with taskbar button while open.
+
 ## [1.0.23] - 2026-10-06
 
 ### Fixed

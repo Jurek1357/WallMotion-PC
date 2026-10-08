@@ -29,8 +29,56 @@ jobs:
           python -m PyInstaller --onefile --windowed --name WallMotion
           --icon assets\icon.ico --add-data "assets;assets" --add-data "locales;locales" --noconfirm main.py
 
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: WallMotion-exe
+          path: dist/WallMotion.exe
+
+  build-rs:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build native settings (release)
+        run: cargo build --release -p wallmotion-settings
+        working-directory: wallmotion-rs
+
+      - name: Stage exe
+        run: Copy-Item wallmotion-rs\target\release\wallmotion-settings.exe WallMotion-Settings.exe
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: WallMotion-Settings-exe
+          path: WallMotion-Settings.exe
+
+  publish:
+    needs: [build-exe, build-rs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          merge-multiple: true
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/WallMotion.exe
+          files: release-assets/*
           generate_release_notes: true
+          body: |
+            Two apps in this release, sharing one library and config:
+
+            - **WallMotion.exe** — the classic Python app (full features).
+            - **WallMotion-Settings.exe** — the new native beta: no installer,
+              no console popups, CZ/EN, light/dark + follow-system, tabs with
+              a Lively-style wallpaper library, YouTube downloads with
+              one-click yt-dlp/ffmpeg setup. Needs `mpv` on PATH for video
+              wallpapers (same as before).
+
+            Copy both exes next to each other and run either one.

@@ -1714,30 +1714,34 @@ fn window_icon() -> Option<egui::IconData> {
 /// Header theme toggle: a painted sun/moon button (font-independent —
 /// the ☀/☾ glyphs are missing from egui's default font).
 fn theme_toggle_button(ui: &mut egui::Ui, current: theme::AppTheme) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 22.0), egui::Sense::click());
+    // Same height as the CZ text button next to it: text row + padding.
+    let h = ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, h), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
         let painter = ui.painter();
         painter.rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
         let fg = visuals.fg_stroke.color;
         let c = rect.center();
+        // Scale the glyph with the button height (drawn for ~22 px).
+        let s = rect.height() / 22.0;
         match current {
             // Sun for the light theme: disc + 8 rays.
             theme::AppTheme::Light => {
-                painter.circle_filled(c, 4.5, fg);
+                painter.circle_filled(c, 4.5 * s, fg);
                 for k in 0..8 {
                     let a = k as f32 * std::f32::consts::PI / 4.0;
                     let dir = egui::vec2(a.cos(), a.sin());
                     painter.line_segment(
-                        [c + dir * 6.5, c + dir * 9.0],
+                        [c + dir * 6.5 * s, c + dir * 9.0 * s],
                         egui::Stroke::new(1.5_f32, fg),
                     );
                 }
             }
             // Moon for the dark theme: disc with a bite taken out.
             theme::AppTheme::Dark => {
-                painter.circle_filled(c, 5.5, fg);
-                painter.circle_filled(c + egui::vec2(2.2, -1.6), 4.4, visuals.bg_fill);
+                painter.circle_filled(c, 5.5 * s, fg);
+                painter.circle_filled(c + egui::vec2(2.2 * s, -1.6 * s), 4.4 * s, visuals.bg_fill);
             }
         }
     }

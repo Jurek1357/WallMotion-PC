@@ -19,6 +19,33 @@ use config::AppConfig;
 const TRAY_SHOW_ID: &str = "show";
 const TRAY_QUIT_ID: &str = "quit";
 
+/// Set by the tray thread on Quit; the UI thread performs the close
+/// (with video cleanup) on its next frame.
+static TRAY_QUIT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Blocking menu loop: instant response even when the UI thread is
+/// throttled while hidden. Only signals; all Qt/egui work stays on
+/// the UI thread.
+fn tray_menu_thread(ctx: egui::Context) {
+    std::thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+        while let Ok(event) = tray_icon::menu::MenuEvent::receiver().recv() {
+            match event.id.0.as_str() {
+                TRAY_SHOW_ID => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.request_repaint();
+                }
+                TRAY_QUIT_ID => {
+                    TRAY_QUIT.store(true, Ordering::SeqCst);
+                    ctx.request_repaint();
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 struct RunningVideo {
     child: std::process::Child,
     ipc: String,
@@ -190,6 +217,11 @@ impl eframe::App for App {
                 _ => {}
             }
         }
+        // Quit requested by the tray thread: close with cleanup.
+        if TRAY_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
+            self.quit_requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         // X/red close hides to tray (video keeps playing); only the
         // tray Quit action lets the close proceed (on_exit stops video).
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
@@ -303,7 +335,10 @@ fn main() {
     if let Err(e) = eframe::run_native(
         "WallMotion (native)",
         options,
-        Box::new(|_cc| Ok(Box::new(App::default()))),
+        Box::new(|cc| {
+            tray_menu_thread(cc.egui_ctx.clone());
+            Ok(Box::new(App::default()))
+        }),
     ) {
         eprintln!("settings error: {e:?}");
     }

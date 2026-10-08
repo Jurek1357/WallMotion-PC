@@ -210,8 +210,9 @@ struct App {
     theme: theme::AppTheme,
     follow_system: bool,
     sys_theme: Option<theme::AppTheme>,
-    applied_dark: bool,
+    applied_style: Option<bool>,
     last_theme_poll: std::time::Instant,
+    logo: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -376,8 +377,9 @@ impl Default for App {
             theme,
             follow_system: saved.theme_follow_system,
             sys_theme: theme::read_system_theme(),
-            applied_dark: true,
+            applied_style: None,
             last_theme_poll: std::time::Instant::now(),
+            logo: None,
         }
     }
 }
@@ -730,7 +732,7 @@ impl App {
 
     /// YouTube section: URL box, tool provisioning, progress, picker.
     fn youtube_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.label(i18n::tr(self.lang, "yt_title"));
+        ui.label(egui::RichText::new(i18n::tr(self.lang, "yt_title")).strong());
         let url_entered = ui
             .add(
                 egui::TextEdit::singleline(&mut self.yt_url)
@@ -749,7 +751,14 @@ impl App {
                     self.yt_queue_total = 0;
                     self.yt_status = i18n::tr(self.lang, "yt_cancelled");
                 }
-            } else if ui.button(i18n::tr(self.lang, "dl_download")).clicked() || url_entered {
+            } else if accent_button(
+                ui,
+                self.applied_style.unwrap_or(true),
+                i18n::tr(self.lang, "dl_download"),
+            )
+            .clicked()
+                || url_entered
+            {
                 self.start_yt_url(ctx);
             }
         });
@@ -829,7 +838,13 @@ impl App {
                     }
                 });
             ui.horizontal_wrapped(|ui| {
-                if ui.button(i18n::tr(self.lang, "dl_selected")).clicked() {
+                if accent_button(
+                    ui,
+                    self.applied_style.unwrap_or(true),
+                    i18n::tr(self.lang, "dl_selected"),
+                )
+                .clicked()
+                {
                     let urls: Vec<String> = self
                         .yt_playlist
                         .iter()
@@ -1030,7 +1045,11 @@ impl App {
                 }
                 if c.add_sized(
                     egui::vec2(c.available_width().max(60.0), 0.0),
-                    egui::Button::new(i18n::tr(self.lang, "library_set")),
+                    egui::Button::new(
+                        egui::RichText::new(i18n::tr(self.lang, "library_set"))
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(accent_color(self.applied_style.unwrap_or(true))),
                 )
                 .clicked()
                 {
@@ -1350,13 +1369,16 @@ impl eframe::App for App {
             self.theme
         };
         let want_dark = effective == theme::AppTheme::Dark;
-        if want_dark != self.applied_dark {
-            ctx.set_visuals(if want_dark {
-                egui::Visuals::dark()
-            } else {
-                egui::Visuals::light()
-            });
-            self.applied_dark = want_dark;
+        if self.applied_style != Some(want_dark) {
+            apply_style(ctx, want_dark);
+            self.applied_style = Some(want_dark);
+        }
+        // App logo texture (once): brand header next to the title.
+        if self.logo.is_none() {
+            if let Some((rgba, w, h)) = app_icon_rgba(48) {
+                let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                self.logo = Some(ctx.load_texture("app-logo", img, egui::TextureOptions::LINEAR));
+            }
         }
         // X/red close hides to tray (video keeps playing, tray icon
         // stays so the app can be reopened); only the tray Quit action
@@ -1415,20 +1437,42 @@ impl eframe::App for App {
                         }
                     });
                 });
-                ui.heading("WallMotion (native)");
+                ui.horizontal(|ui| {
+                    if let Some(logo) = &self.logo {
+                        ui.image((logo.id(), egui::vec2(30.0, 30.0)));
+                    }
+                    ui.vertical(|ui| {
+                        ui.heading("WallMotion");
+                        ui.label(
+                            egui::RichText::new(i18n::tr(self.lang, "subtitle"))
+                                .small()
+                                .weak(),
+                        );
+                    });
+                });
                 ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
                 ui.separator();
+                // Pill tabs: active one gets the brand accent fill.
                 ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut self.tab,
-                        Tab::Settings,
-                        i18n::tr(self.lang, "settings_title"),
-                    );
-                    ui.selectable_value(
-                        &mut self.tab,
-                        Tab::Library,
-                        i18n::tr(self.lang, "library_title"),
-                    );
+                    let dark = self.applied_style.unwrap_or(true);
+                    for (tab, key) in [
+                        (Tab::Settings, "settings_title"),
+                        (Tab::Library, "library_title"),
+                    ] {
+                        let active = self.tab == tab;
+                        let label = i18n::tr(self.lang, key);
+                        let btn = if active {
+                            egui::Button::new(
+                                egui::RichText::new(label).color(egui::Color32::WHITE),
+                            )
+                            .fill(accent_color(dark))
+                        } else {
+                            egui::Button::new(label)
+                        };
+                        if ui.add(btn).clicked() {
+                            self.tab = tab;
+                        }
+                    }
                 });
                 ui.separator();
                 if self.tab == Tab::Settings {
@@ -1457,7 +1501,8 @@ impl eframe::App for App {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button(i18n::tr(self.lang, "apply")).clicked() {
+                        let dark = self.applied_style.unwrap_or(true);
+                        if accent_button(ui, dark, i18n::tr(self.lang, "apply")).clicked() {
                             self.set_wallpaper();
                         }
                         if ui.button(i18n::tr(self.lang, "stop")).clicked() {
@@ -1558,7 +1603,7 @@ impl eframe::App for App {
                         }
                     });
                     ui.separator();
-                    ui.label(i18n::tr(self.lang, "rotation_title"));
+                    ui.label(egui::RichText::new(i18n::tr(self.lang, "rotation_title")).strong());
                     ui.horizontal_wrapped(|ui| {
                         if ui
                             .checkbox(
@@ -1709,6 +1754,47 @@ fn window_icon() -> Option<egui::IconData> {
         width: w,
         height: h,
     })
+}
+
+/// Brand accent (the logo purple), theme-aware for contrast.
+fn accent_color(dark: bool) -> egui::Color32 {
+    if dark {
+        egui::Color32::from_rgb(124, 92, 255)
+    } else {
+        egui::Color32::from_rgb(93, 72, 200)
+    }
+}
+
+/// Whole-app style: brand accent selection, rounded widgets/windows.
+fn apply_style(ctx: &egui::Context, dark: bool) {
+    let mut visuals = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    let accent = accent_color(dark);
+    visuals.selection.bg_fill = accent;
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, accent);
+    for w in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        w.corner_radius = egui::CornerRadius::same(8);
+    }
+    visuals.window_corner_radius = egui::CornerRadius::same(10);
+    visuals.menu_corner_radius = egui::CornerRadius::same(8);
+    ctx.set_visuals(visuals);
+}
+
+/// Primary call-to-action button: accent fill, white text.
+fn accent_button(ui: &mut egui::Ui, dark: bool, text: String) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE))
+            .fill(accent_color(dark)),
+    )
 }
 
 /// Header theme toggle: a painted sun/moon button (font-independent —

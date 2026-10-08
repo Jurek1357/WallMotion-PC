@@ -17,6 +17,30 @@ A lightweight Wallpaper Engine alternative for **Windows 10/11**:
 - **Dark / light themes** and **Czech / English UI**, remembered between launches
 - **Screen measurement** – detects resolution of all monitors (physical pixels, HiDPI aware)
 
+### Native app (beta, ships from v1.1.0)
+
+[Releases](https://github.com/Jurek1357/WallMotion-PC/releases) contain
+two exes sharing one library folder and one config:
+
+- **WallMotion.exe** – the classic Python app above (full features).
+- **WallMotion-Settings.exe** – the native Rust rewrite (~28 MB, no
+  Python, no console popups): tabbed window (**Settings** +
+  **Wallpaper library**, Lively-style grid with search, favorites and
+  detail panel), CZ/EN switch, light/dark theme + follow-system toggle,
+  YouTube downloads with one-click yt-dlp/ffmpeg setup, playlist picker,
+  per-monitor selection, rotation playlist, per-wallpaper volume memory,
+  pause on fullscreen/battery, CLI (`--set/--stop/--mute/--volume`),
+  hide-to-tray on X.
+
+Video wallpapers need `mpv` on PATH (the classic exe brings its own
+decoder; the native one drives mpv). Everything else the native app
+downloads itself on first click. Build from source with a Rust
+toolchain (`winget install Rustlang.Rustup.Beta` + MinGW-w64 or MSVC):
+
+```bash
+cargo build --release -p wallmotion-settings --manifest-path wallmotion-rs/Cargo.toml
+```
+
 ### How it works
 
 - **Image:** resized/cropped to the measured resolution and set via `SystemParametersInfo`.
@@ -136,6 +160,30 @@ Lehká náhrada Wallpaper Engine pro **Windows 10/11**:
 - **Tmavý / světlý motiv** a **čeština / angličtina**, pamatuje se pro příště
 - **Měření obrazovky** – zjistí rozlišení všech monitorů (fyzické pixely, HiDPI aware)
 
+### Nativní apka (beta, v releasích od v1.1.0)
+
+V [Releases](https://github.com/Jurek1357/WallMotion-PC/releases) jsou
+dva exe soubory se společnou složkou knihovny a jedním configem:
+
+- **WallMotion.exe** – klasická Python apka výše (plná funkčnost).
+- **WallMotion-Settings.exe** – nativní přepis v Rustu (cca 28 MB, bez
+  Pythonu, bez vyskakujících konzolí): okno se záložkami (**Nastavení** +
+  **Knihovna tapet**, mřížka ala Lively s hledáním, oblíbenými a
+  detailem), přepínač CZ/EN, světlý/tmavý motiv + následování systému,
+  stahování z YouTube s instalací yt-dlp/ffmpeg na jedno kliknutí,
+  výběr playlistu, výběr monitoru, rotace, paměť hlasitosti na soubor,
+  pauza na fullscreen/baterii, CLI (`--set/--stop/--mute/--volume`),
+  schování do traye křížkem.
+
+Video tapety potřebují `mpv` v PATH (klasické exe má dekodér vlastní;
+nativní řídí mpv). Vše ostatní si nativní apka stáhne sama na první
+kliknutí. Build ze zdrojáků s Rust toolchainem (plus MinGW-w64 nebo
+MSVC):
+
+```bash
+cargo build --release -p wallmotion-settings --manifest-path wallmotion-rs/Cargo.toml
+```
+
 ### Jak to funguje
 
 - **Obrázek:** ořízne se na změřené rozlišení a nastaví přes `SystemParametersInfo`.
@@ -231,8 +279,6 @@ vydavatele"). Appka je bezpečná (MIT licence, zdrojáky výše) – vyber si:
   Inteligentní řízení aplikací → Vypnuto,
 - nebo spusť ze zdrojáků (`pip install -r requirements.txt`,
   `python main.py`) – skripty puštěné podepsaným Pythonem procházejí.
-
-### Příspěvky a licence
 
 ### Příspěvky a licence
 

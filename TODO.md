@@ -79,6 +79,33 @@ Priorities: **P1** = do first (unblocks everything else), **P2** = next,
   and/or submit each release `.exe` to Microsoft malware analysis
   (free, builds SmartScreen reputation over time).
 
+## Rust port — `wallmotion-rs` (shipped as `WallMotion-Settings.exe` in Releases from v1.1.0)
+
+- [x] **Core:** paths, session detection, rotation queue, autopause rules,
+  volume memory, YouTube pure logic (URL/playlist/progress/errors) —
+  all unit-tested, no-dependency `wallmotion-core`.
+- [x] **Windows render:** WorkerW discovery, GDI canvas, cover-fit static
+  images, per-monitor + virtual-screen targets, fullscreen/battery sensors.
+- [x] **Playback:** mpv sidecar (`--wid`) + JSON IPC pause/mute/volume,
+  no console popups (`CREATE_NO_WINDOW` everywhere).
+- [x] **Settings window (egui):** tabs Settings / Wallpaper library
+  (Lively-style grid, search, favorites, detail, double-click to set),
+  CZ/EN (shared `locales/*.json`), light/dark + follow-system, brand
+  styling (logo, pill tabs, accent CTAs), responsive rows, hide-to-tray
+  on X with taskbar button, tray icon + menu, single instance + remote
+  CLI, rotation UI, volume memory wiring.
+- [x] **YouTube in Rust:** standalone yt-dlp sidecar with one-click
+  install/update, one-click ffmpeg setup, playlist picker + queue,
+  progress bar, Cancel, localized errors.
+- [x] **Releases:** tag pipeline builds + publishes
+  `WallMotion-Settings.exe` next to the AppImage (Python exe dropped
+  from v1.1.0 assets; stays in older releases).
+- [ ] **Still missing vs Python:** autostart toggle, update check,
+  drag & drop file, Linux render backends for the native binary,
+  static `libmpv` link instead of the mpv sidecar.
+- [ ] **Then:** workshop index, code signing, libmpv evaluation
+  (same P3 items as above).
+
 ## Done
 
 - [x] MIT license, contributing guide, CoC, security policy

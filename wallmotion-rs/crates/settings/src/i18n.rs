@@ -40,11 +40,12 @@ impl Lang {
         }
     }
 
-    /// Header button label: current language code.
+    /// Header button label: the language it switches TO
+    /// (CZ active → offers EN and vice versa).
     pub fn button_label(self) -> &'static str {
         match self {
-            Lang::Cs => "CZ",
-            Lang::En => "EN",
+            Lang::Cs => "EN",
+            Lang::En => "CZ",
         }
     }
 }

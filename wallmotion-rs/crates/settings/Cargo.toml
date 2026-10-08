@@ -29,3 +29,4 @@ windows = { version = "0.61", features = [
 
 [target.'cfg(windows)'.build-dependencies]
 embed-manifest = "1"
+embed-resource = "2"

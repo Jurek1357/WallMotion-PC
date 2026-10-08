@@ -142,6 +142,19 @@ struct App {
     ytdlp_path: Option<std::path::PathBuf>,
     ytdlp_ver: Option<String>,
     ffmpeg_path: Option<std::path::PathBuf>,
+    // Library gallery (Lively-style tab).
+    tab: Tab,
+    favorites: std::collections::HashSet<String>,
+    lib_search: String,
+    lib_fav_only: bool,
+    lib_selected: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Tab {
+    #[default]
+    Settings,
+    Library,
 }
 
 #[derive(Debug, Clone)]
@@ -274,6 +287,11 @@ impl Default for App {
             ytdlp_path: None,
             ytdlp_ver: None,
             ffmpeg_path: None,
+            tab: Tab::Settings,
+            favorites: saved.favorites.into_iter().collect(),
+            lib_search: String::new(),
+            lib_fav_only: false,
+            lib_selected: None,
         }
     }
 }
@@ -364,6 +382,11 @@ impl App {
                 .iter()
                 .map(|(k, v)| (k.clone(), config::VolumeEntry::from(*v)))
                 .collect(),
+            favorites: {
+                let mut favs: Vec<String> = self.favorites.iter().cloned().collect();
+                favs.sort();
+                favs
+            },
         }
         .save();
     }
@@ -719,6 +742,193 @@ impl App {
         }
     }
 
+    /// Wallpaper library tab: search + favorites filter, thumbnail grid
+    /// on the left, detail panel (preview, actions) on the right.
+    /// Lively-style layout (replaces the old inline row list).
+    fn library_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.lib_search).hint_text("Search…"));
+            ui.checkbox(&mut self.lib_fav_only, "Favorites only");
+            if ui.button("Refresh").clicked() {
+                self.rescan_library(ctx);
+            }
+            if ui.button("Open folder").clicked() {
+                open_folder(&library::media_dir());
+            }
+        });
+        let query = self.lib_search.trim().to_lowercase();
+        let items: Vec<library::MediaItem> = self
+            .library
+            .iter()
+            .filter(|it| {
+                if self.lib_fav_only && !self.favorites.contains(&it.name) {
+                    return false;
+                }
+                query.is_empty() || it.name.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect();
+        // Drop the selection when its file vanished.
+        if let Some(sel) = &self.lib_selected {
+            if !self.library.iter().any(|it| &it.name == sel) {
+                self.lib_selected = None;
+            }
+        }
+        enum LibAction {
+            Select(String),
+            Set(String),
+            AddRot(String),
+            Delete(String),
+            ToggleFav(String),
+        }
+        let mut action: Option<LibAction> = None;
+        ui.columns(2, |cols| {
+            egui::ScrollArea::vertical()
+                .max_height(380.0)
+                .show(&mut cols[0], |ui| {
+                    for item in &items {
+                        let selected = self.lib_selected.as_deref() == Some(&item.name);
+                        let stroke = if selected {
+                            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(124, 92, 255))
+                        } else {
+                            egui::Stroke::NONE
+                        };
+                        let mut clicked = false;
+                        egui::Frame::default()
+                            .stroke(stroke)
+                            .inner_margin(4.0)
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    if let Some(tex) = self.thumbs.get(&item.name) {
+                                        let size = tex.size_vec2();
+                                        let w = 140.0;
+                                        let h = (w * size.y / size.x.max(1.0)).clamp(40.0, 90.0);
+                                        if ui.image((tex.id(), egui::vec2(w, h))).clicked() {
+                                            clicked = true;
+                                        }
+                                    } else {
+                                        let badge = match item.kind {
+                                            library::MediaKind::Image => "[img]",
+                                            library::MediaKind::Video => "[vid]",
+                                        };
+                                        if ui.button(badge).clicked() {
+                                            clicked = true;
+                                        }
+                                    }
+                                    let fav = if self.favorites.contains(&item.name) {
+                                        "★ "
+                                    } else {
+                                        ""
+                                    };
+                                    if ui
+                                        .label(
+                                            egui::RichText::new(format!("{fav}{}", item.name))
+                                                .small(),
+                                        )
+                                        .clicked()
+                                    {
+                                        clicked = true;
+                                    }
+                                });
+                            });
+                        if clicked {
+                            action = Some(LibAction::Select(item.name.clone()));
+                        }
+                    }
+                });
+            // Detail panel for the selected wallpaper.
+            let detail: Option<library::MediaItem> = self
+                .lib_selected
+                .as_ref()
+                .and_then(|sel| self.library.iter().find(|it| &it.name == sel).cloned());
+            match detail {
+                Some(item) => {
+                    let c = &mut cols[1];
+                    if let Some(tex) = self.thumbs.get(&item.name) {
+                        let size = tex.size_vec2();
+                        let w = c.available_width().max(80.0);
+                        let h = (w * size.y / size.x.max(1.0)).clamp(60.0, 220.0);
+                        c.image((tex.id(), egui::vec2(w, h)));
+                    }
+                    c.label(egui::RichText::new(&item.name).strong());
+                    c.label(
+                        egui::RichText::new(format!(
+                            "{} · {}",
+                            item.kind.label(),
+                            library::format_size(item.size)
+                        ))
+                        .small(),
+                    );
+                    let is_fav = self.favorites.contains(&item.name);
+                    if c.button(if is_fav {
+                        "★ Favorited"
+                    } else {
+                        "☆ Favorite"
+                    })
+                    .clicked()
+                    {
+                        action = Some(LibAction::ToggleFav(item.name.clone()));
+                    }
+                    if c.add_sized(
+                        egui::vec2(c.available_width().max(60.0), 0.0),
+                        egui::Button::new("Set wallpaper"),
+                    )
+                    .clicked()
+                    {
+                        action = Some(LibAction::Set(item.name.clone()));
+                    }
+                    if c.button("Add to rotation").clicked() {
+                        action = Some(LibAction::AddRot(item.name.clone()));
+                    }
+                    if c.button("Delete").clicked() {
+                        action = Some(LibAction::Delete(item.name.clone()));
+                    }
+                }
+                None => {
+                    cols[1].label("Pick a wallpaper on the left.");
+                }
+            }
+        });
+        match action {
+            Some(LibAction::Select(name)) => {
+                self.lib_selected = Some(name);
+            }
+            Some(LibAction::Set(name)) => {
+                if let Some(path) = library::safe_path(&library::media_dir(), &name) {
+                    self.lib_selected = Some(name);
+                    self.file = path.to_string_lossy().into_owned();
+                    self.set_wallpaper();
+                    self.persist();
+                }
+            }
+            Some(LibAction::AddRot(name)) => {
+                if let Some(path) = library::safe_path(&library::media_dir(), &name) {
+                    self.rotation.add(&path.to_string_lossy());
+                    self.persist();
+                }
+            }
+            Some(LibAction::Delete(name)) => {
+                if let Some(path) = library::safe_path(&library::media_dir(), &name) {
+                    let _ = std::fs::remove_file(&path);
+                    self.rotation.remove(&path.to_string_lossy());
+                    self.favorites.remove(&name);
+                    if self.lib_selected.as_deref() == Some(&name) {
+                        self.lib_selected = None;
+                    }
+                    self.persist();
+                    self.rescan_library(ctx);
+                }
+            }
+            Some(LibAction::ToggleFav(name)) => {
+                if !self.favorites.remove(&name) {
+                    self.favorites.insert(name);
+                }
+                self.persist();
+            }
+            None => {}
+        }
+    }
+
     fn mpv_bin() -> Option<PathBuf> {
         if let Ok(path) = std::env::var("WALLMOTION_MPV") {
             let p = PathBuf::from(path);
@@ -966,240 +1176,191 @@ impl eframe::App for App {
                 ui.label(format!("Backend: {}", wallmotion_win::backend_name()));
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("Video file:");
-                    ui.text_edit_singleline(&mut self.file);
-                    if ui.button("Browse…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter(
-                                "images & video",
-                                &[
-                                    "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm",
-                                    "avi", "mov",
-                                ],
-                            )
-                            .pick_file()
-                        {
-                            self.file = path.to_string_lossy().into_owned();
-                            self.apply_volume_memory();
-                            self.persist();
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Set as wallpaper").clicked() {
-                        self.set_wallpaper();
-                    }
-                    if ui.button("Stop").clicked() {
-                        self.stop_video();
-                    }
-                    let pause_label = if self.paused { "Resume" } else { "Pause" };
-                    ui.add_enabled_ui(self.running.is_some(), |ui| {
-                        if ui.button(pause_label).clicked() {
-                            self.toggle_pause();
-                        }
-                    });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Monitor:");
-                    let current = if self.monitor.is_empty() {
-                        "All monitors".to_string()
-                    } else {
-                        self.monitors
-                            .iter()
-                            .find(|m| m.name == self.monitor)
-                            .map(|m| m.label.clone())
-                            .unwrap_or_else(|| self.monitor.clone())
-                    };
-                    egui::ComboBox::from_id_salt("monitor")
-                        .selected_text(current)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(&mut self.monitor, String::new(), "All monitors")
-                                .changed()
-                            {
-                                self.persist();
-                            }
-                            for m in self.monitors.clone() {
-                                if ui
-                                    .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
-                                    .changed()
-                                {
-                                    self.persist();
-                                }
-                            }
-                        });
-                    if ui.button("Refresh").clicked() {
-                        self.monitors = discover_monitors();
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.muted, "Mute").changed() {
-                        self.apply_mute_volume();
-                        self.persist();
-                    }
-                    ui.label("Volume:");
-                    if ui
-                        .add(egui::Slider::new(&mut self.volume, 0..=100).show_value(false))
-                        .changed()
-                    {
-                        self.apply_mute_volume();
-                        self.persist();
-                    }
-                    ui.label(format!("{}%", self.volume));
-                });
-                ui.horizontal(|ui| {
-                    if ui
-                        .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
-                        .changed()
-                    {
-                        self.auto
-                            .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                        self.persist();
-                    }
-                    if ui
-                        .checkbox(&mut self.pause_on_battery, "Pause on battery")
-                        .changed()
-                    {
-                        self.auto
-                            .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                        self.persist();
-                    }
+                    ui.selectable_value(&mut self.tab, Tab::Settings, "Settings");
+                    ui.selectable_value(&mut self.tab, Tab::Library, "Wallpaper library");
                 });
                 ui.separator();
-                ui.label("Rotation playlist:");
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
-                        self.last_rotation = std::time::Instant::now();
-                        self.persist();
-                    }
-                    ui.label("Every:");
-                    egui::ComboBox::from_id_salt("rot_interval")
-                        .selected_text(wallmotion_core::rotation::format_interval(
-                            self.rotation_interval,
-                        ))
-                        .show_ui(ui, |ui| {
-                            for &secs in wallmotion_core::rotation::INTERVALS {
+                if self.tab == Tab::Settings {
+                    ui.horizontal(|ui| {
+                        ui.label("Video file:");
+                        ui.text_edit_singleline(&mut self.file);
+                        if ui.button("Browse…").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter(
+                                    "images & video",
+                                    &[
+                                        "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm",
+                                        "avi", "mov",
+                                    ],
+                                )
+                                .pick_file()
+                            {
+                                self.file = path.to_string_lossy().into_owned();
+                                self.apply_volume_memory();
+                                self.persist();
+                            }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Set as wallpaper").clicked() {
+                            self.set_wallpaper();
+                        }
+                        if ui.button("Stop").clicked() {
+                            self.stop_video();
+                        }
+                        let pause_label = if self.paused { "Resume" } else { "Pause" };
+                        ui.add_enabled_ui(self.running.is_some(), |ui| {
+                            if ui.button(pause_label).clicked() {
+                                self.toggle_pause();
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Monitor:");
+                        let current = if self.monitor.is_empty() {
+                            "All monitors".to_string()
+                        } else {
+                            self.monitors
+                                .iter()
+                                .find(|m| m.name == self.monitor)
+                                .map(|m| m.label.clone())
+                                .unwrap_or_else(|| self.monitor.clone())
+                        };
+                        egui::ComboBox::from_id_salt("monitor")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
                                 if ui
                                     .selectable_value(
-                                        &mut self.rotation_interval,
-                                        secs,
-                                        wallmotion_core::rotation::format_interval(secs),
+                                        &mut self.monitor,
+                                        String::new(),
+                                        "All monitors",
                                     )
                                     .changed()
                                 {
-                                    self.last_rotation = std::time::Instant::now();
                                     self.persist();
                                 }
-                            }
-                        });
-                    let mut shuffle = self.rotation.shuffle();
-                    if ui.checkbox(&mut shuffle, "Shuffle").changed() {
-                        self.rotation.set_shuffle(shuffle);
-                        self.persist();
-                    }
-                    let mut repeat = self.rotation.repeat();
-                    if ui.checkbox(&mut repeat, "Repeat").changed() {
-                        self.rotation.set_repeat(repeat);
-                        self.persist();
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Add current").clicked()
-                        && PathBuf::from(self.file.trim()).is_file()
-                    {
-                        self.rotation.add(self.file.trim());
-                        self.persist();
-                    }
-                    if ui.button("Play").clicked() {
-                        self.rotation_enabled = true;
-                        if let Some(path) = self.rotation.restart() {
-                            self.play_rotation_path(path);
-                        } else {
-                            self.persist();
-                        }
-                    }
-                    ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
-                        if ui.button("Skip").clicked() {
-                            if let Some(path) = self.rotation.next_file() {
-                                self.play_rotation_path(path);
-                            }
-                        }
-                    });
-                    if ui.button("Clear").clicked() {
-                        self.rotation.clear();
-                        self.rotation_enabled = false;
-                        self.persist();
-                    }
-                    ui.label(format!("{} files", self.rotation.len()));
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label(format!("Library ({}):", self.library.len()));
-                    if ui.button("Refresh").clicked() {
-                        self.rescan_library(ctx);
-                    }
-                    if ui.button("Open folder").clicked() {
-                        open_folder(&library::media_dir());
-                    }
-                });
-                egui::ScrollArea::vertical()
-                    .max_height(180.0)
-                    .show(ui, |ui| {
-                        let items = self.library.clone();
-                        for item in items {
-                            ui.horizontal(|ui| {
-                                if let Some(tex) = self.thumbs.get(&item.name) {
-                                    let size = tex.size_vec2();
-                                    let h = 48.0;
-                                    let w = h * size.x / size.y.max(1.0);
-                                    ui.image((tex.id(), egui::vec2(w, h)));
-                                } else {
-                                    ui.label(match item.kind {
-                                        library::MediaKind::Image => "[img]",
-                                        library::MediaKind::Video => "[vid]",
-                                    });
-                                }
-                                ui.vertical(|ui| {
-                                    ui.label(&item.name);
-                                    ui.label(format!(
-                                        "{} · {}",
-                                        item.kind.label(),
-                                        library::format_size(item.size)
-                                    ));
-                                });
-                                if ui.button("Use").clicked() {
-                                    if let Some(path) =
-                                        library::safe_path(&library::media_dir(), &item.name)
+                                for m in self.monitors.clone() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.monitor,
+                                            m.name.clone(),
+                                            &m.label,
+                                        )
+                                        .changed()
                                     {
-                                        self.file = path.to_string_lossy().into_owned();
-                                        self.set_wallpaper();
                                         self.persist();
-                                    }
-                                }
-                                if ui.button("+Rot").clicked() {
-                                    if let Some(path) =
-                                        library::safe_path(&library::media_dir(), &item.name)
-                                    {
-                                        self.rotation.add(&path.to_string_lossy());
-                                        self.persist();
-                                    }
-                                }
-                                if ui.button("Del").clicked() {
-                                    if let Some(path) =
-                                        library::safe_path(&library::media_dir(), &item.name)
-                                    {
-                                        let _ = std::fs::remove_file(&path);
-                                        self.rotation.remove(&path.to_string_lossy());
-                                        self.persist();
-                                        self.rescan_library(ctx);
                                     }
                                 }
                             });
-                            ui.separator();
+                        if ui.button("Refresh").clicked() {
+                            self.monitors = discover_monitors();
                         }
                     });
-                ui.separator();
-                self.youtube_section(ui, ctx);
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut self.muted, "Mute").changed() {
+                            self.apply_mute_volume();
+                            self.persist();
+                        }
+                        ui.label("Volume:");
+                        if ui
+                            .add(egui::Slider::new(&mut self.volume, 0..=100).show_value(false))
+                            .changed()
+                        {
+                            self.apply_mute_volume();
+                            self.persist();
+                        }
+                        ui.label(format!("{}%", self.volume));
+                    });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .checkbox(&mut self.pause_on_fullscreen, "Pause on fullscreen")
+                            .changed()
+                        {
+                            self.auto
+                                .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.persist();
+                        }
+                        if ui
+                            .checkbox(&mut self.pause_on_battery, "Pause on battery")
+                            .changed()
+                        {
+                            self.auto
+                                .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.persist();
+                        }
+                    });
+                    ui.separator();
+                    ui.label("Rotation playlist:");
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
+                            self.last_rotation = std::time::Instant::now();
+                            self.persist();
+                        }
+                        ui.label("Every:");
+                        egui::ComboBox::from_id_salt("rot_interval")
+                            .selected_text(wallmotion_core::rotation::format_interval(
+                                self.rotation_interval,
+                            ))
+                            .show_ui(ui, |ui| {
+                                for &secs in wallmotion_core::rotation::INTERVALS {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.rotation_interval,
+                                            secs,
+                                            wallmotion_core::rotation::format_interval(secs),
+                                        )
+                                        .changed()
+                                    {
+                                        self.last_rotation = std::time::Instant::now();
+                                        self.persist();
+                                    }
+                                }
+                            });
+                        let mut shuffle = self.rotation.shuffle();
+                        if ui.checkbox(&mut shuffle, "Shuffle").changed() {
+                            self.rotation.set_shuffle(shuffle);
+                            self.persist();
+                        }
+                        let mut repeat = self.rotation.repeat();
+                        if ui.checkbox(&mut repeat, "Repeat").changed() {
+                            self.rotation.set_repeat(repeat);
+                            self.persist();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Add current").clicked()
+                            && PathBuf::from(self.file.trim()).is_file()
+                        {
+                            self.rotation.add(self.file.trim());
+                            self.persist();
+                        }
+                        if ui.button("Play").clicked() {
+                            self.rotation_enabled = true;
+                            if let Some(path) = self.rotation.restart() {
+                                self.play_rotation_path(path);
+                            } else {
+                                self.persist();
+                            }
+                        }
+                        ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
+                            if ui.button("Skip").clicked() {
+                                if let Some(path) = self.rotation.next_file() {
+                                    self.play_rotation_path(path);
+                                }
+                            }
+                        });
+                        if ui.button("Clear").clicked() {
+                            self.rotation.clear();
+                            self.rotation_enabled = false;
+                            self.persist();
+                        }
+                        ui.label(format!("{} files", self.rotation.len()));
+                    });
+                    ui.separator();
+                    self.youtube_section(ui, ctx);
+                } else {
+                    self.library_tab(ui, ctx);
+                }
                 ui.separator();
                 ui.label(&self.status);
             }); // ScrollArea
@@ -1228,6 +1389,7 @@ impl eframe::App for App {
 
 fn tray_icon_rgba() -> Vec<u8> {
     // 32x32 accent tile with a darker border (no asset dependency).
+    // Fallback only: `build_tray` prefers the real logo from icon.png.
     let mut buf = vec![0u8; 32 * 32 * 4];
     for y in 0..32 {
         for x in 0..32 {
@@ -1243,6 +1405,28 @@ fn tray_icon_rgba() -> Vec<u8> {
     buf
 }
 
+/// App logo (`assets/icon.png`, 256x256) decoded + resized to RGBA.
+/// Embedded with `include_bytes!` so release builds need no asset dir.
+fn app_icon_rgba(size: u32) -> Option<(Vec<u8>, u32, u32)> {
+    let bytes = include_bytes!("../../../../assets/icon.png");
+    let img = image::load_from_memory(bytes).ok()?;
+    let rgba = img
+        .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    Some((rgba.into_raw(), w, h))
+}
+
+/// Window title-bar icon, if the logo decodes.
+fn window_icon() -> Option<egui::IconData> {
+    let (rgba, w, h) = app_icon_rgba(64)?;
+    Some(egui::IconData {
+        rgba,
+        width: w,
+        height: h,
+    })
+}
+
 fn build_tray() -> Option<tray_icon::TrayIcon> {
     use tray_icon::{menu::Menu, Icon, TrayIconBuilder};
     let menu = Menu::new();
@@ -1250,7 +1434,10 @@ fn build_tray() -> Option<tray_icon::TrayIcon> {
     let quit = tray_icon::menu::MenuItem::with_id(TRAY_QUIT_ID, "Quit", true, None);
     menu.append(&show).ok()?;
     menu.append(&quit).ok()?;
-    let icon = Icon::from_rgba(tray_icon_rgba(), 32, 32).ok()?;
+    let icon = match app_icon_rgba(32) {
+        Some((rgba, w, h)) => Icon::from_rgba(rgba, w, h).ok()?,
+        None => Icon::from_rgba(tray_icon_rgba(), 32, 32).ok()?,
+    };
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_icon(icon)
@@ -1291,11 +1478,15 @@ fn main() {
         remote_rx.is_some(),
         if _tray.is_some() { "ok" } else { "FAILED" }
     ));
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([480.0, 660.0])
+        .with_taskbar(false)
+        .with_title("WallMotion (native)");
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([480.0, 660.0])
-            .with_taskbar(false)
-            .with_title("WallMotion (native)"),
+        viewport,
         ..Default::default()
     };
     if let Err(e) = eframe::run_native(

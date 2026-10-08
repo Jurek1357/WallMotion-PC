@@ -39,6 +39,10 @@ pub struct AppConfig {
     /// Same shape as Python `volumes` (see `wallmotion/volumememory.py`).
     #[serde(default)]
     pub volumes: HashMap<String, VolumeEntry>,
+    /// Favorite library files (file names, sorted). Same shape as the
+    /// Python app's `favorites` list.
+    #[serde(default)]
+    pub favorites: Vec<String>,
 }
 
 /// Rotation playlist state for serde. Validation (interval whitelist)
@@ -128,6 +132,7 @@ impl Default for AppConfig {
             pause_on_battery: false,
             rotation: RotationConfig::default(),
             volumes: HashMap::new(),
+            favorites: vec![],
         }
     }
 }
@@ -183,6 +188,7 @@ mod tests {
             pause_on_battery: false,
             rotation: RotationConfig::default(),
             volumes: HashMap::new(),
+            favorites: vec![],
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

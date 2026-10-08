@@ -20,6 +20,9 @@ pub struct AppConfig {
     pub muted: bool,
     #[serde(default = "default_volume")]
     pub volume: u8,
+    /// Monitor device name (`\\.\DISPLAY1`) or empty for all monitors.
+    #[serde(default)]
+    pub monitor: String,
 }
 
 fn default_muted() -> bool {
@@ -36,6 +39,7 @@ impl Default for AppConfig {
             last_path: String::new(),
             muted: default_muted(),
             volume: default_volume(),
+            monitor: String::new(),
         }
     }
 }
@@ -86,6 +90,7 @@ mod tests {
             last_path: "C:\\vids\\a.mp4".to_string(),
             muted: false,
             volume: 70,
+            monitor: String::new(),
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

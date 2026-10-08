@@ -59,6 +59,39 @@ struct App {
     volume: u8,
     running: Option<RunningVideo>,
     quit_requested: bool,
+    paused: bool,
+    monitor: String,
+    monitors: Vec<MonitorChoice>,
+}
+
+#[derive(Debug, Clone)]
+struct MonitorChoice {
+    name: String,
+    label: String,
+    rect: Option<(i32, i32, i32, i32)>,
+}
+
+fn monitor_label(name: &str, rect: (i32, i32, i32, i32), primary: bool) -> String {
+    let (l, t, r, b) = rect;
+    let tag = if primary { " - primary" } else { "" };
+    format!("Monitor {} ({}x{}){tag}", name, r - l, b - t)
+}
+
+fn discover_monitors() -> Vec<MonitorChoice> {
+    #[cfg(windows)]
+    {
+        return wallmotion_win::canvas::sys::list_monitors()
+            .into_iter()
+            .map(|m| {
+                let label = monitor_label(&m.name, m.rect, m.primary);
+                MonitorChoice { name: m.name, label, rect: Some(m.rect) }
+            })
+            .collect();
+    }
+    #[cfg(not(windows))]
+    {
+        vec![]
+    }
 }
 
 impl Default for App {
@@ -71,6 +104,9 @@ impl Default for App {
             volume: saved.volume,
             running: None,
             quit_requested: false,
+            paused: false,
+            monitor: saved.monitor,
+            monitors: discover_monitors(),
         }
     }
 }
@@ -81,6 +117,7 @@ impl App {
             last_path: self.file.clone(),
             muted: self.muted,
             volume: self.volume,
+            monitor: self.monitor.clone(),
         }
         .save();
     }
@@ -104,7 +141,20 @@ impl App {
             #[cfg(not(windows))]
             let _ = run.canvas;
         }
+        self.paused = false;
         self.status = "Stopped.".to_string();
+    }
+
+    fn toggle_pause(&mut self) {
+        if let Some(run) = &self.running {
+            self.paused = !self.paused;
+            ipc_set(&run.ipc, "pause", &IpcValue::Bool(self.paused));
+            self.status = if self.paused {
+                "Paused.".to_string()
+            } else {
+                "Playing.".to_string()
+            };
+        }
     }
 
     fn set_wallpaper(&mut self) {
@@ -127,9 +177,24 @@ impl App {
     }
 
     #[cfg(windows)]
+    fn selected_rect(&self) -> (i32, i32, i32, i32) {
+        if self.monitor.is_empty() {
+            return wallmotion_win::canvas::sys::virtual_screen();
+        }
+        if let Some(m) = self.monitors.iter().find(|m| m.name == self.monitor) {
+            if let Some((l, t, r, b)) = m.rect {
+                return (l, t, (r - l).max(1), (b - t).max(1));
+            }
+        }
+        // Monitor vanished (unplugged) -> fall back to virtual screen.
+        wallmotion_win::canvas::sys::virtual_screen()
+    }
+
+    #[cfg(windows)]
     fn set_image(&mut self, path: &std::path::Path) {
-        use wallmotion_win::{canvas::sys as canvas, wallpaper};
-        let (w, h) = canvas::primary_size();
+        use wallmotion_win::wallpaper;
+        let (x, y, w, h) = self.selected_rect();
+        let _ = (x, y); // SystemParametersInfo sets all monitors at once.
         let fitted = wallpaper::fit_image_to_screen(path, w as u32, h as u32);
         if wallpaper::set_static_wallpaper(&fitted) {
             self.status = format!("Image fitted to {w}x{h} and set.");
@@ -154,8 +219,8 @@ impl App {
         };
         #[cfg(windows)]
         {
-            let (w, h) = canvas::primary_size();
-            let wc = match canvas::setup_wallpaper_canvas(0, 0, w, h) {
+            let (x, y, w, h) = self.selected_rect();
+            let wc = match canvas::setup_wallpaper_canvas(x, y, w, h) {
                 Some(wc) => wc,
                 None => {
                     self.status = "No desktop canvas (run on Windows).".to_string();
@@ -172,7 +237,12 @@ impl App {
             };
             match wallmotion_player::spawn_mpv(&opts) {
                 Ok(child) => {
-                    self.status = format!("Playing behind icons ({w}x{h}).");
+                    let where_tag = if self.monitor.is_empty() {
+                        "all monitors".to_string()
+                    } else {
+                        self.monitor.clone()
+                    };
+                    self.status = format!("Playing behind icons ({w}x{h} at {x},{y} on {where_tag}).");
                     self.running = Some(RunningVideo {
                         child,
                         ipc: opts.ipc_endpoint,
@@ -257,6 +327,45 @@ impl eframe::App for App {
                 }
                 if ui.button("Stop").clicked() {
                     self.stop_video();
+                }
+                let pause_label = if self.paused { "Resume" } else { "Pause" };
+                ui.add_enabled_ui(self.running.is_some(), |ui| {
+                    if ui.button(pause_label).clicked() {
+                        self.toggle_pause();
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Monitor:");
+                let current = if self.monitor.is_empty() {
+                    "All monitors".to_string()
+                } else {
+                    self.monitors
+                        .iter()
+                        .find(|m| m.name == self.monitor)
+                        .map(|m| m.label.clone())
+                        .unwrap_or_else(|| self.monitor.clone())
+                };
+                egui::ComboBox::from_id_salt("monitor")
+                    .selected_text(current)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_value(&mut self.monitor, String::new(), "All monitors")
+                            .changed()
+                        {
+                            self.persist();
+                        }
+                        for m in self.monitors.clone() {
+                            if ui
+                                .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
+                                .changed()
+                            {
+                                self.persist();
+                            }
+                        }
+                    });
+                if ui.button("Refresh").clicked() {
+                    self.monitors = discover_monitors();
                 }
             });
             ui.horizontal(|ui| {

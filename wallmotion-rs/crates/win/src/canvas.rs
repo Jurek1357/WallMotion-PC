@@ -29,8 +29,8 @@ pub struct WallpaperCanvas {
 pub mod sys {
     use super::{CanvasSpec, WallpaperCanvas};
     use windows::{
-        core::w,
-        Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+        core::{w, BOOL},
+        Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Win32::Graphics::Gdi::*,
         Win32::System::LibraryLoader::GetModuleHandleW,
         Win32::UI::WindowsAndMessaging::*,
@@ -192,6 +192,72 @@ pub mod sys {
     /// Needs DPI awareness for physical pixels (embed the manifest).
     pub fn primary_size() -> (i32, i32) {
         unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) }
+    }
+
+    /// Virtual screen geometry (x, y, w, h) spanning all monitors.
+    pub fn virtual_screen() -> (i32, i32, i32, i32) {
+        unsafe {
+            let x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            let y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            let w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            let h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            (x, y, w.max(1), h.max(1))
+        }
+    }
+
+    /// One display monitor.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct MonitorInfo {
+        /// Device name (e.g. `\\.\DISPLAY1`), stable across reboots.
+        pub name: String,
+        /// Full monitor rect (left, top, right, bottom).
+        pub rect: (i32, i32, i32, i32),
+        /// Primary display flag.
+        pub primary: bool,
+    }
+
+    /// All monitors via EnumDisplayMonitors. Empty when unavailable.
+    pub fn list_monitors() -> Vec<MonitorInfo> {
+        struct Sink {
+            out: Vec<MonitorInfo>,
+        }
+        unsafe extern "system" fn callback(
+            hmon: HMONITOR,
+            _hdc: HDC,
+            _rect: *mut RECT,
+            lparam: LPARAM,
+        ) -> BOOL {
+            unsafe {
+                let sink = &mut *(lparam.0 as *mut Sink);
+                let mut info: MONITORINFOEXW = std::mem::zeroed();
+                info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+                if GetMonitorInfoW(hmon, &mut info as *mut _ as *mut MONITORINFO).as_bool()
+                {
+                    let end = info.szDevice
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(info.szDevice.len());
+                    let name = String::from_utf16_lossy(&info.szDevice[..end]);
+                    let r = info.monitorInfo.rcMonitor;
+                    sink.out.push(MonitorInfo {
+                        name,
+                        rect: (r.left, r.top, r.right, r.bottom),
+                        primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                    });
+                }
+            }
+            BOOL(1)
+        }
+        let mut sink = Sink { out: vec![] };
+        unsafe {
+            let _ = EnumDisplayMonitors(
+                Some(HDC(std::ptr::null_mut())),
+                None,
+                Some(callback),
+                LPARAM(&mut sink as *mut _ as isize),
+            );
+        }
+        sink.out
     }
 
     /// Full setup: find WorkerW, create the canvas over (x, y, w, h),

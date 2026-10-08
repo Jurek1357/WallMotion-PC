@@ -29,6 +29,50 @@ pub struct AppConfig {
     /// Pause video when running on battery.
     #[serde(default)]
     pub pause_on_battery: bool,
+    /// Rotation playlist. Same shape as the Python app's `rotation` object
+    /// (`files/index/shuffle/repeat/enabled/interval`) — both apps share
+    /// the config file.
+    #[serde(default)]
+    pub rotation: RotationConfig,
+}
+
+/// Rotation playlist state for serde. Validation (interval whitelist)
+/// happens when the queue is built, so corrupt files fall back safely.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotationConfig {
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub index: i64,
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default = "default_repeat")]
+    pub repeat: bool,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_interval")]
+    pub interval: u64,
+}
+
+impl Default for RotationConfig {
+    fn default() -> Self {
+        Self {
+            files: vec![],
+            index: 0,
+            shuffle: false,
+            repeat: true,
+            enabled: false,
+            interval: default_interval(),
+        }
+    }
+}
+
+fn default_repeat() -> bool {
+    true
+}
+
+fn default_interval() -> u64 {
+    wallmotion_core::rotation::DEFAULT_INTERVAL
 }
 
 fn default_pause_on_fullscreen() -> bool {
@@ -52,6 +96,7 @@ impl Default for AppConfig {
             monitor: String::new(),
             pause_on_fullscreen: default_pause_on_fullscreen(),
             pause_on_battery: false,
+            rotation: RotationConfig::default(),
         }
     }
 }
@@ -105,6 +150,7 @@ mod tests {
             monitor: String::new(),
             pause_on_fullscreen: true,
             pause_on_battery: false,
+            rotation: RotationConfig::default(),
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

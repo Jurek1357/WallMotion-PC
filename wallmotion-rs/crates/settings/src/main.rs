@@ -25,23 +25,69 @@ const TRAY_QUIT_ID: &str = "quit";
 /// (with video cleanup) on its next frame.
 static TRAY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Blocking menu loop: instant response even when the UI thread is
-/// throttled while hidden. Only signals; all Qt/egui work stays on
-/// the UI thread.
+/// Append one line to the debug log in the temp dir. Best effort, never panics.
+fn debug_log(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("wallmotion-settings-debug.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{} pid={} {msg}", chrono_stamp(), std::process::id());
+    }
+}
+
+fn chrono_stamp() -> String {
+    // No chrono dep: seconds since epoch is enough for a debug log.
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => format!("{}", d.as_secs()),
+        Err(_) => "?".to_string(),
+    }
+}
+
+/// Show the main window: un-minimize, un-hide, repaint.
+fn show_window(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.request_repaint();
+}
+
+/// Polling tray loop: menu events + left-click-to-show. Polling (not
+/// blocking) so one thread serves both channels without starving either.
+/// Instant response even when the UI thread is throttled while hidden.
 fn tray_menu_thread(ctx: egui::Context) {
     std::thread::spawn(move || {
         use std::sync::atomic::Ordering;
-        while let Ok(event) = tray_icon::menu::MenuEvent::receiver().recv() {
-            match event.id.0.as_str() {
-                TRAY_SHOW_ID => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.request_repaint();
+        debug_log("tray thread started");
+        loop {
+            let mut idle = true;
+            while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+                idle = false;
+                debug_log(&format!("menu event: {}", event.id.0.as_str()));
+                match event.id.0.as_str() {
+                    TRAY_SHOW_ID => show_window(&ctx),
+                    TRAY_QUIT_ID => {
+                        TRAY_QUIT.store(true, Ordering::SeqCst);
+                        ctx.request_repaint();
+                    }
+                    _ => {}
                 }
-                TRAY_QUIT_ID => {
-                    TRAY_QUIT.store(true, Ordering::SeqCst);
-                    ctx.request_repaint();
+            }
+            while let Ok(event) = tray_icon::TrayIconEvent::receiver().try_recv() {
+                idle = false;
+                if let tray_icon::TrayIconEvent::Click {
+                    button: tray_icon::MouseButton::Left,
+                    button_state: tray_icon::MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    debug_log("tray left-click: show");
+                    show_window(&ctx);
                 }
-                _ => {}
+            }
+            if idle {
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
     });
@@ -70,6 +116,10 @@ struct App {
     last_poll: std::time::Instant,
     remote_rx: Option<std::sync::mpsc::Receiver<String>>,
     pending_start: bool,
+    rotation: wallmotion_core::rotation::RotationQueue,
+    rotation_enabled: bool,
+    rotation_interval: u64,
+    last_rotation: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +181,18 @@ fn poll_battery() -> bool {
 impl Default for App {
     fn default() -> Self {
         let saved = AppConfig::load();
+        let interval = if wallmotion_core::rotation::INTERVALS.contains(&saved.rotation.interval) {
+            saved.rotation.interval
+        } else {
+            wallmotion_core::rotation::DEFAULT_INTERVAL
+        };
+        let mut rotation = wallmotion_core::rotation::RotationQueue::new(
+            saved.rotation.files.clone(),
+            saved.rotation.index,
+            saved.rotation.shuffle,
+            saved.rotation.repeat,
+        );
+        rotation.prune_missing();
         Self {
             file: saved.last_path,
             status: "Pick a video file, then Set as wallpaper.".to_string(),
@@ -151,6 +213,10 @@ impl Default for App {
             last_poll: std::time::Instant::now(),
             remote_rx: None,
             pending_start: false,
+            rotation_enabled: saved.rotation.enabled,
+            rotation_interval: interval,
+            last_rotation: std::time::Instant::now(),
+            rotation,
         }
     }
 }
@@ -217,8 +283,49 @@ impl App {
             monitor: self.monitor.clone(),
             pause_on_fullscreen: self.pause_on_fullscreen,
             pause_on_battery: self.pause_on_battery,
+            rotation: config::RotationConfig {
+                files: self.rotation.files().to_vec(),
+                index: self.rotation.index(),
+                shuffle: self.rotation.shuffle(),
+                repeat: self.rotation.repeat(),
+                enabled: self.rotation_enabled,
+                interval: self.rotation_interval,
+            },
         }
         .save();
+    }
+
+    /// Play a rotation item now: set file, apply, restart the timer.
+    fn play_rotation_path(&mut self, path: String) {
+        self.file = path;
+        self.set_wallpaper();
+        self.persist();
+        self.last_rotation = std::time::Instant::now();
+    }
+
+    /// One rotation tick. Timer-driven (videos loop, so unlike Python
+    /// there is no follow-video-end mode).
+    fn rotation_tick(&mut self) {
+        if !self.rotation_enabled || self.rotation.is_empty() {
+            return;
+        }
+        if self.last_rotation.elapsed()
+            < std::time::Duration::from_secs(self.rotation_interval.max(1))
+        {
+            return;
+        }
+        self.last_rotation = std::time::Instant::now();
+        if let Some(path) = self.rotation.next_file() {
+            if !self.rotation.repeat() && path == self.file {
+                // End of a non-repeating list: keep the last wallpaper
+                // and switch rotation off (mirrors Python).
+                self.rotation_enabled = false;
+            } else {
+                self.file = path;
+                self.set_wallpaper();
+            }
+            self.persist();
+        }
     }
 
     fn mpv_bin() -> Option<PathBuf> {
@@ -406,12 +513,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Tray menu actions from the icon thread.
+        // Tray menu actions (backup path; the tray thread usually wins).
         while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+            debug_log(&format!("menu event on ui thread: {}", event.id.0.as_str()));
             match event.id.0.as_str() {
-                TRAY_SHOW_ID => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                }
+                TRAY_SHOW_ID => show_window(ctx),
                 TRAY_QUIT_ID => {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -444,11 +550,16 @@ impl eframe::App for App {
             self.pending_start = false;
             self.set_wallpaper();
         }
-        // X/red close hides to tray (video keeps playing); only the
+        // X/red close minimizes to tray (video keeps playing); only the
         // tray Quit action lets the close proceed (on_exit stops video).
+        // NOTE: never Visible(false) here — hidden windows stop receiving
+        // frames in winit, the UI loop dies and tray menu goes dead with
+        // it (verified with examples/probe.rs). Minimized windows keep
+        // framing, and with_taskbar(false) keeps the taskbar clean.
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
+            debug_log("close requested: minimize to tray");
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("WallMotion (native)");
@@ -554,8 +665,75 @@ impl eframe::App for App {
                 }
             });
             ui.separator();
+            ui.label("Rotation playlist:");
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut self.rotation_enabled, "Rotate").changed() {
+                    self.last_rotation = std::time::Instant::now();
+                    self.persist();
+                }
+                ui.label("Every:");
+                egui::ComboBox::from_id_salt("rot_interval")
+                    .selected_text(wallmotion_core::rotation::format_interval(
+                        self.rotation_interval,
+                    ))
+                    .show_ui(ui, |ui| {
+                        for &secs in wallmotion_core::rotation::INTERVALS {
+                            if ui
+                                .selectable_value(
+                                    &mut self.rotation_interval,
+                                    secs,
+                                    wallmotion_core::rotation::format_interval(secs),
+                                )
+                                .changed()
+                            {
+                                self.last_rotation = std::time::Instant::now();
+                                self.persist();
+                            }
+                        }
+                    });
+                let mut shuffle = self.rotation.shuffle();
+                if ui.checkbox(&mut shuffle, "Shuffle").changed() {
+                    self.rotation.set_shuffle(shuffle);
+                    self.persist();
+                }
+                let mut repeat = self.rotation.repeat();
+                if ui.checkbox(&mut repeat, "Repeat").changed() {
+                    self.rotation.set_repeat(repeat);
+                    self.persist();
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Add current").clicked() && PathBuf::from(self.file.trim()).is_file() {
+                    self.rotation.add(self.file.trim());
+                    self.persist();
+                }
+                if ui.button("Play").clicked() {
+                    self.rotation_enabled = true;
+                    if let Some(path) = self.rotation.restart() {
+                        self.play_rotation_path(path);
+                    } else {
+                        self.persist();
+                    }
+                }
+                ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
+                    if ui.button("Skip").clicked() {
+                        if let Some(path) = self.rotation.next_file() {
+                            self.play_rotation_path(path);
+                        }
+                    }
+                });
+                if ui.button("Clear").clicked() {
+                    self.rotation.clear();
+                    self.rotation_enabled = false;
+                    self.persist();
+                }
+                ui.label(format!("{} files", self.rotation.len()));
+            });
+            ui.separator();
             ui.label(&self.status);
         });
+        // Rotation tick (timer-driven; videos loop, no follow-video mode).
+        self.rotation_tick();
         // Autopause poll (Python POLL_INTERVAL_MS): pause at once, resume
         // after 2 clean polls. Throttled — update() runs every ~50ms.
         if self.last_poll.elapsed()
@@ -564,13 +742,14 @@ impl eframe::App for App {
             self.last_poll = std::time::Instant::now();
             self.autopause_tick();
         }
-        // Keep the loop alive while hidden in the tray: without a
+        // Keep the loop alive while minimized to tray: without a
         // periodic repaint, update() never runs and tray clicks die.
         // 50ms keeps the menu snappy at negligible idle cost.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        debug_log("on_exit: stop video");
         self.stop_video();
     }
 }
@@ -635,9 +814,15 @@ fn main() {
     }
     let remote_rx = remote::start_server();
     let _tray = build_tray();
+    debug_log(&format!(
+        "main start action={action} server={} tray={}",
+        remote_rx.is_some(),
+        if _tray.is_some() { "ok" } else { "FAILED" }
+    ));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0, 380.0])
+            .with_inner_size([460.0, 440.0])
+            .with_taskbar(false)
             .with_title("WallMotion (native)"),
         ..Default::default()
     };

@@ -7,6 +7,7 @@
 
 pub mod autopause;
 pub mod paths;
+pub mod rotation;
 pub mod session;
 
 /// Crate version (matches workspace package version).

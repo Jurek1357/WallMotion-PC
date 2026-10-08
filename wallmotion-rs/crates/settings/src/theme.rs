@@ -29,14 +29,6 @@ impl AppTheme {
         }
     }
 
-    /// Sun/moon glyph for the header toggle button (text, not emoji).
-    pub fn button_glyph(self) -> &'static str {
-        match self {
-            AppTheme::Light => "☀",
-            AppTheme::Dark => "☾",
-        }
-    }
-
     pub fn toggle(self) -> Self {
         match self {
             AppTheme::Light => AppTheme::Dark,

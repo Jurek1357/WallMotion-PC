@@ -1396,7 +1396,15 @@ impl eframe::App for App {
                             self.persist();
                         }
                         ui.add_enabled_ui(!self.follow_system, |ui| {
-                            if ui.button(self.theme.button_glyph()).clicked() {
+                            let tip = if self.theme == theme::AppTheme::Dark {
+                                i18n::tr(self.lang, "theme_light")
+                            } else {
+                                i18n::tr(self.lang, "theme_dark")
+                            };
+                            if theme_toggle_button(ui, self.theme)
+                                .on_hover_text(tip)
+                                .clicked()
+                            {
                                 self.theme = self.theme.toggle();
                                 self.persist();
                             }
@@ -1701,6 +1709,39 @@ fn window_icon() -> Option<egui::IconData> {
         width: w,
         height: h,
     })
+}
+
+/// Header theme toggle: a painted sun/moon button (font-independent —
+/// the ☀/☾ glyphs are missing from egui's default font).
+fn theme_toggle_button(ui: &mut egui::Ui, current: theme::AppTheme) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, 22.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let painter = ui.painter();
+        painter.rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
+        let fg = visuals.fg_stroke.color;
+        let c = rect.center();
+        match current {
+            // Sun for the light theme: disc + 8 rays.
+            theme::AppTheme::Light => {
+                painter.circle_filled(c, 4.5, fg);
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::PI / 4.0;
+                    let dir = egui::vec2(a.cos(), a.sin());
+                    painter.line_segment(
+                        [c + dir * 6.5, c + dir * 9.0],
+                        egui::Stroke::new(1.5_f32, fg),
+                    );
+                }
+            }
+            // Moon for the dark theme: disc with a bite taken out.
+            theme::AppTheme::Dark => {
+                painter.circle_filled(c, 5.5, fg);
+                painter.circle_filled(c + egui::vec2(2.2, -1.6), 4.4, visuals.bg_fill);
+            }
+        }
+    }
+    response
 }
 
 fn build_tray() -> Option<tray_icon::TrayIcon> {

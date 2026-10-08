@@ -4429,6 +4429,7 @@ dependencies = [
  "eframe",
  "egui",
  "embed-manifest",
+ "image",
  "rfd",
  "serde",
  "serde_json",

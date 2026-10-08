@@ -124,6 +124,7 @@ struct App {
     library: Vec<library::MediaItem>,
     thumbs: std::collections::HashMap<String, egui::TextureHandle>,
     lib_scanned: bool,
+    volumes: std::collections::HashMap<String, wallmotion_core::volumememory::VolumeSetting>,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +237,11 @@ impl Default for App {
             library: vec![],
             thumbs: Default::default(),
             lib_scanned: false,
+            volumes: saved
+                .volumes
+                .into_iter()
+                .map(|(k, v)| (k, wallmotion_core::volumememory::VolumeSetting::from(v)))
+                .collect(),
         }
     }
 }
@@ -294,7 +300,18 @@ impl App {
         ctx.request_repaint();
     }
 
-    fn persist(&self) {
+    fn persist(&mut self) {
+        // Remember current slider/mute for the current file first
+        // (mirrors Python `_save_config` + `volumememory.remember`).
+        if !self.file.trim().is_empty() {
+            wallmotion_core::volumememory::remember(
+                &mut self.volumes,
+                self.file.trim(),
+                self.volume,
+                self.muted,
+                wallmotion_core::volumememory::MAX_ENTRIES,
+            );
+        }
         AppConfig {
             last_path: self.file.clone(),
             muted: self.muted,
@@ -310,8 +327,29 @@ impl App {
                 enabled: self.rotation_enabled,
                 interval: self.rotation_interval,
             },
+            volumes: self
+                .volumes
+                .iter()
+                .map(|(k, v)| (k.clone(), config::VolumeEntry::from(*v)))
+                .collect(),
         }
         .save();
+    }
+
+    /// Restore remembered volume for the current file, if any.
+    /// Mirrors Python `_apply_volume_memory`: the volume is always
+    /// recalled, but mute is never turned OFF by memory (it may turn ON).
+    fn apply_volume_memory(&mut self) {
+        let path = self.file.trim().to_string();
+        if path.is_empty() {
+            return;
+        }
+        if let Some(entry) = wallmotion_core::volumememory::lookup(Some(&self.volumes), &path) {
+            self.volume = entry.volume;
+            if entry.muted {
+                self.muted = true;
+            }
+        }
     }
 
     /// Play a rotation item now: set file, apply, restart the timer.
@@ -448,6 +486,8 @@ impl App {
             self.status = "Pick an existing image or video file first.".to_string();
             return;
         }
+        // Per-file volume memory (mirrors Python `_apply_volume_memory`).
+        self.apply_volume_memory();
         let ext = path
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
@@ -630,6 +670,7 @@ impl eframe::App for App {
                         .pick_file()
                     {
                         self.file = path.to_string_lossy().into_owned();
+                        self.apply_volume_memory();
                         self.persist();
                     }
                 }

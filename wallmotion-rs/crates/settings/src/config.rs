@@ -5,6 +5,7 @@
 //! migration can read the Python app's file.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Where the config file lives on this machine.
@@ -34,6 +35,10 @@ pub struct AppConfig {
     /// the config file.
     #[serde(default)]
     pub rotation: RotationConfig,
+    /// Per-wallpaper volume memory (`{path: {volume, muted}}`).
+    /// Same shape as Python `volumes` (see `wallmotion/volumememory.py`).
+    #[serde(default)]
+    pub volumes: HashMap<String, VolumeEntry>,
 }
 
 /// Rotation playlist state for serde. Validation (interval whitelist)
@@ -83,6 +88,31 @@ fn default_muted() -> bool {
     true
 }
 
+/// One remembered per-file entry. Field defaults keep old hand-edited
+/// configs loadable (missing keys fall back to the global defaults).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VolumeEntry {
+    #[serde(default = "default_volume")]
+    pub volume: u8,
+    #[serde(default = "default_muted")]
+    pub muted: bool,
+}
+
+impl From<VolumeEntry> for wallmotion_core::volumememory::VolumeSetting {
+    fn from(e: VolumeEntry) -> Self {
+        Self::new(e.volume.min(100), e.muted)
+    }
+}
+
+impl From<wallmotion_core::volumememory::VolumeSetting> for VolumeEntry {
+    fn from(s: wallmotion_core::volumememory::VolumeSetting) -> Self {
+        Self {
+            volume: s.volume.min(100),
+            muted: s.muted,
+        }
+    }
+}
+
 fn default_volume() -> u8 {
     30
 }
@@ -97,6 +127,7 @@ impl Default for AppConfig {
             pause_on_fullscreen: default_pause_on_fullscreen(),
             pause_on_battery: false,
             rotation: RotationConfig::default(),
+            volumes: HashMap::new(),
         }
     }
 }
@@ -151,6 +182,7 @@ mod tests {
             pause_on_fullscreen: true,
             pause_on_battery: false,
             rotation: RotationConfig::default(),
+            volumes: HashMap::new(),
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

@@ -43,6 +43,15 @@ pub struct AppConfig {
     /// Python app's `favorites` list.
     #[serde(default)]
     pub favorites: Vec<String>,
+    /// UI language code (`"cs"`/`"en"`). Same key as the Python app.
+    #[serde(default = "default_lang")]
+    pub lang: String,
+    /// Fixed theme (`"light"`/`"dark"`). Same key as the Python app.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// Follow the OS theme (registry on Windows). Same key as Python.
+    #[serde(default)]
+    pub theme_follow_system: bool,
 }
 
 /// Rotation playlist state for serde. Validation (interval whitelist)
@@ -121,6 +130,14 @@ fn default_volume() -> u8 {
     30
 }
 
+fn default_lang() -> String {
+    "cs".to_string()
+}
+
+fn default_theme() -> String {
+    "dark".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -133,6 +150,9 @@ impl Default for AppConfig {
             rotation: RotationConfig::default(),
             volumes: HashMap::new(),
             favorites: vec![],
+            lang: default_lang(),
+            theme: default_theme(),
+            theme_follow_system: false,
         }
     }
 }
@@ -189,6 +209,9 @@ mod tests {
             rotation: RotationConfig::default(),
             volumes: HashMap::new(),
             favorites: vec![],
+            lang: default_lang(),
+            theme: default_theme(),
+            theme_follow_system: false,
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

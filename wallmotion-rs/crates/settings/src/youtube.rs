@@ -34,10 +34,11 @@ pub enum YtEvent {
     /// Download done, final file path.
     Finished(String),
     /// Mapped code (`NEED_FFMPEG`, `NEED_SIGNIN`, `UNAVAILABLE`,
-    /// `TIMEOUT`, `EMPTY_PLAYLIST`) or raw stderr (truncated).
+    /// `TIMEOUT`, `EMPTY_PLAYLIST`, `NO_START:<e>`, `TOOL_BLOCKED`,
+    /// `DL_NOFILE`) or raw stderr (truncated).
     Error(String),
-    /// Tool provisioning/update finished (human-readable info).
-    Tool(String),
+    /// Tool provisioning/update finished: locale key + `{v}` arg.
+    Tool { key: &'static str, arg: String },
 }
 
 /// Shared handle to a running download child (for Cancel).
@@ -162,7 +163,7 @@ pub fn spawn_download(
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                let _ = tx.send(YtEvent::Error(format!("cannot start yt-dlp: {e}")));
+                let _ = tx.send(YtEvent::Error(format!("NO_START:{e}")));
                 return;
             }
         };
@@ -210,7 +211,7 @@ pub fn spawn_download(
                     let _ = tx.send(YtEvent::Finished(path.to_string_lossy().into_owned()));
                 }
                 None => {
-                    let _ = tx.send(YtEvent::Error("file not found".to_string()));
+                    let _ = tx.send(YtEvent::Error("DL_NOFILE".to_string()));
                 }
             }
         } else {
@@ -261,7 +262,7 @@ pub fn spawn_playlist_fetch(
                 let _ = tx.send(YtEvent::Error(yt::map_download_error(&tail, true)));
             }
             Err(e) => {
-                let _ = tx.send(YtEvent::Error(format!("cannot start yt-dlp: {e}")));
+                let _ = tx.send(YtEvent::Error(format!("NO_START:{e}")));
             }
         }
     });
@@ -313,12 +314,13 @@ pub fn spawn_provision_ytdlp(tx: Sender<YtEvent>) {
         match fetch_url(yt::YTDLP_DOWNLOAD_URL, &dest) {
             Ok(()) => match ytdlp_version(&dest) {
                 Some(v) => {
-                    let _ = tx.send(YtEvent::Tool(format!("yt-dlp ready ({v})")));
+                    let _ = tx.send(YtEvent::Tool {
+                        key: "yt_ready",
+                        arg: v,
+                    });
                 }
                 None => {
-                    let _ = tx.send(YtEvent::Error(
-                        "downloaded yt-dlp does not run (blocked?)".to_string(),
-                    ));
+                    let _ = tx.send(YtEvent::Error("TOOL_BLOCKED".to_string()));
                 }
             },
             Err(e) => {
@@ -345,7 +347,10 @@ pub fn spawn_ytdlp_update(exe: PathBuf, tx: Sender<YtEvent>) {
                 let last = text.lines().rev().find(|l| !l.trim().is_empty());
                 match (o.status.success(), ytdlp_version(&exe)) {
                     (true, Some(v)) => {
-                        let _ = tx.send(YtEvent::Tool(format!("yt-dlp updated ({v})")));
+                        let _ = tx.send(YtEvent::Tool {
+                            key: "yt_updated",
+                            arg: v,
+                        });
                     }
                     _ => {
                         let _ =
@@ -439,7 +444,10 @@ pub fn spawn_provision_ffmpeg(tx: Sender<YtEvent>) {
         hide_console(&mut verify);
         let runs = verify.output().map(|o| o.status.success()).unwrap_or(false);
         if runs {
-            let _ = tx.send(YtEvent::Tool("ffmpeg ready (1080p merges on)".to_string()));
+            let _ = tx.send(YtEvent::Tool {
+                key: "yt_ffmpeg_ready",
+                arg: String::new(),
+            });
         } else {
             let _ = tx.send(YtEvent::Error(
                 "ffmpeg.exe is blocked from running".to_string(),
@@ -448,17 +456,27 @@ pub fn spawn_provision_ffmpeg(tx: Sender<YtEvent>) {
     });
 }
 
-/// Human text for a mapped error code (UI language: English).
-pub fn error_text(code: &str) -> String {
-    match code {
-        "NEED_FFMPEG" => "Merge needs ffmpeg (Get ffmpeg below, or single-file ~720p).".to_string(),
-        "NEED_SIGNIN" => "YouTube asks for sign-in for this video.".to_string(),
-        "UNAVAILABLE" => "Video unavailable or private.".to_string(),
-        "TIMEOUT" => "Network timeout, try again.".to_string(),
-        "EMPTY_PLAYLIST" => "Playlist is empty.".to_string(),
-        "cancelled" => "Cancelled.".to_string(),
-        other => format!("Download error: {other}"),
+/// Localized text for a mapped error code (mirrors the Python `_on_yt_error`
+/// mapping through the `yt_*` locale keys).
+pub fn error_text(lang: crate::i18n::Lang, code: &str) -> String {
+    use crate::i18n::{tr, trf};
+    if code == "cancelled" {
+        return tr(lang, "yt_cancelled");
     }
+    let detail = match code {
+        "NEED_FFMPEG" => tr(lang, "yt_need_ffmpeg"),
+        "NEED_SIGNIN" => tr(lang, "yt_need_signin"),
+        "UNAVAILABLE" => tr(lang, "yt_unavailable"),
+        "TIMEOUT" => tr(lang, "yt_timeout"),
+        "EMPTY_PLAYLIST" => tr(lang, "yt_playlist_empty"),
+        "TOOL_BLOCKED" => tr(lang, "tool_blocked"),
+        "DL_NOFILE" => tr(lang, "dl_nofile"),
+        _ => match code.strip_prefix("NO_START:") {
+            Some(e) => trf(lang, "tool_nostart", &[("e", e)]),
+            None => code.chars().take(300).collect(),
+        },
+    };
+    trf(lang, "yt_error", &[("e", &detail)])
 }
 
 /// Cancel a running download child, if any.

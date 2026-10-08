@@ -205,26 +205,26 @@ pub fn ensure_video_thumb(video: &Path, cache_dir: &Path) -> Option<PathBuf> {
     if fresh {
         return Some(out);
     }
-    let status = std::process::Command::new(&ffmpeg)
-        .args([
-            "-y",
-            "-v",
-            "error",
-            "-ss",
-            &THUMB_SECONDS.to_string(),
-            "-i",
-            &video.to_string_lossy(),
-            "-frames:v",
-            "1",
-            "-vf",
-            &format!("scale={THUMB_WIDTH}:-1"),
-            &out.to_string_lossy(),
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .ok()?;
+    let mut cmd = std::process::Command::new(&ffmpeg);
+    cmd.args([
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        &THUMB_SECONDS.to_string(),
+        "-i",
+        &video.to_string_lossy(),
+        "-frames:v",
+        "1",
+        "-vf",
+        &format!("scale={THUMB_WIDTH}:-1"),
+        &out.to_string_lossy(),
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
+    crate::youtube::hide_console(&mut cmd);
+    let status = cmd.status().ok()?;
     if status.success() && out.is_file() {
         Some(out)
     } else {

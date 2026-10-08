@@ -139,13 +139,19 @@ pub fn mpv_args(opts: &SpawnOptions) -> Vec<String> {
 }
 
 /// Spawn mpv detached from our console. Caller owns the [`Child`].
+/// No console window pops up (CREATE_NO_WINDOW on Windows).
 pub fn spawn_mpv(opts: &SpawnOptions) -> io::Result<Child> {
-    Command::new(&opts.mpv)
-        .args(mpv_args(opts))
+    let mut cmd = Command::new(&opts.mpv);
+    cmd.args(mpv_args(opts))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.spawn()
 }
 
 /// Default IPC endpoint for this platform.

@@ -105,13 +105,25 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
     find_on_path(name)
 }
 
+/// Never pop a console window for child processes. The app itself is
+/// `#![windows_subsystem = "windows"]`, but every spawned exe (yt-dlp,
+/// ffmpeg, curl, powershell, tar) gets its own console unless told not to.
+#[cfg(windows)]
+pub fn hide_console(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+}
+
+/// No-op off Windows.
+#[cfg(not(windows))]
+pub fn hide_console(_cmd: &mut std::process::Command) {}
+
 /// `yt-dlp --version`, trimmed first line. Best effort.
 pub fn ytdlp_version(exe: &Path) -> Option<String> {
-    let out = std::process::Command::new(exe)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--version").stdin(std::process::Stdio::null());
+    hide_console(&mut cmd);
+    let out = cmd.output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -141,13 +153,13 @@ pub fn spawn_download(
         let mut args = yt::download_args(&template, ffmpeg_dir.as_deref());
         args.push(url.clone());
         let video_id = yt::extract_video_id(&url);
-        let mut child = match std::process::Command::new(&ytdlp)
-            .args(&args)
+        let mut cmd = std::process::Command::new(&ytdlp);
+        cmd.args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-        {
+            .stderr(std::process::Stdio::piped());
+        hide_console(&mut cmd);
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
                 let _ = tx.send(YtEvent::Error(format!("cannot start yt-dlp: {e}")));
@@ -221,10 +233,10 @@ pub fn spawn_playlist_fetch(
     std::thread::spawn(move || {
         let mut args = yt::playlist_args();
         args.push(url);
-        let out = std::process::Command::new(&ytdlp)
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .output();
+        let mut cmd = std::process::Command::new(&ytdlp);
+        cmd.args(&args).stdin(std::process::Stdio::null());
+        hide_console(&mut cmd);
+        let out = cmd.output();
         if cancel.load(Ordering::SeqCst) {
             let _ = tx.send(YtEvent::Error("cancelled".to_string()));
             return;
@@ -261,12 +273,13 @@ fn fetch_url(url: &str, dest: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
     }
     // Fast path: curl ships with Windows 10+.
-    let curl = std::process::Command::new("curl.exe")
-        .args(["-fL", "--connect-timeout", "20", "-o"])
+    let mut curl = std::process::Command::new("curl.exe");
+    curl.args(["-fL", "--connect-timeout", "20", "-o"])
         .arg(dest)
         .arg(url)
-        .stdin(std::process::Stdio::null())
-        .output();
+        .stdin(std::process::Stdio::null());
+    hide_console(&mut curl);
+    let curl = curl.output();
     if let Ok(o) = curl {
         if o.status.success() && dest.is_file() {
             return Ok(());
@@ -278,9 +291,11 @@ fn fetch_url(url: &str, dest: &Path) -> Result<(), String> {
         url,
         dest.to_string_lossy().replace('\'', "''")
     );
-    let out = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &ps])
-        .stdin(std::process::Stdio::null())
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-Command", &ps])
+        .stdin(std::process::Stdio::null());
+    hide_console(&mut cmd);
+    let out = cmd
         .output()
         .map_err(|e| format!("download failed (curl+powershell): {e}"))?;
     if out.status.success() && dest.is_file() {
@@ -316,10 +331,10 @@ pub fn spawn_provision_ytdlp(tx: Sender<YtEvent>) {
 /// `yt-dlp -U` self-update (fixes stale builds — the Python killer).
 pub fn spawn_ytdlp_update(exe: PathBuf, tx: Sender<YtEvent>) {
     std::thread::spawn(move || {
-        let out = std::process::Command::new(&exe)
-            .arg("-U")
-            .stdin(std::process::Stdio::null())
-            .output();
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("-U").stdin(std::process::Stdio::null());
+        hide_console(&mut cmd);
+        let out = cmd.output();
         match out {
             Ok(o) => {
                 let text = format!(
@@ -388,13 +403,14 @@ pub fn spawn_provision_ffmpeg(tx: Sender<YtEvent>) {
             fail(e);
             return;
         }
-        let out = std::process::Command::new("tar.exe")
-            .args(["-xf"])
+        let mut tar = std::process::Command::new("tar.exe");
+        tar.args(["-xf"])
             .arg(&zip)
             .args(["-C"])
             .arg(&tmp)
-            .stdin(std::process::Stdio::null())
-            .output();
+            .stdin(std::process::Stdio::null());
+        hide_console(&mut tar);
+        let out = tar.output();
         if !out.map(|o| o.status.success()).unwrap_or(false) {
             fail("cannot unpack ffmpeg.zip".to_string());
             return;
@@ -418,12 +434,10 @@ pub fn spawn_provision_ffmpeg(tx: Sender<YtEvent>) {
         }
         let _ = std::fs::remove_dir_all(&tmp);
         // Verify it actually runs (SmartScreen can block it).
-        let runs = std::process::Command::new(&dest)
-            .arg("-version")
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let mut verify = std::process::Command::new(&dest);
+        verify.arg("-version").stdin(std::process::Stdio::null());
+        hide_console(&mut verify);
+        let runs = verify.output().map(|o| o.status.success()).unwrap_or(false);
         if runs {
             let _ = tx.send(YtEvent::Tool("ffmpeg ready (1080p merges on)".to_string()));
         } else {

@@ -73,6 +73,10 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("yt_dling_ytdlp", "Downloading yt-dlp…"),
             ("yt_updating", "Updating yt-dlp…"),
             ("yt_dling_ffmpeg", "Downloading ffmpeg (~80 MB)…"),
+            (
+                "yt_auto_setup",
+                "Installing yt-dlp + ffmpeg in the background…",
+            ),
             ("yt_ready", "yt-dlp ready ({v})"),
             ("yt_updated", "yt-dlp updated ({v})"),
             ("yt_ffmpeg_ready", "ffmpeg ready (1080p merges on)"),
@@ -138,6 +142,7 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("yt_dling_ytdlp", "Stahuji yt-dlp…"),
             ("yt_updating", "Aktualizuji yt-dlp…"),
             ("yt_dling_ffmpeg", "Stahuji ffmpeg (~80 MB)…"),
+            ("yt_auto_setup", "Instaluji yt-dlp + ffmpeg na pozadí…"),
             ("yt_ready", "yt-dlp připraveno ({v})"),
             ("yt_updated", "yt-dlp aktualizováno ({v})"),
             (

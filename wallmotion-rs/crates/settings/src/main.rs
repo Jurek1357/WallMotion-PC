@@ -199,6 +199,11 @@ struct App {
     ytdlp_path: Option<std::path::PathBuf>,
     ytdlp_ver: Option<String>,
     ffmpeg_path: Option<std::path::PathBuf>,
+    // Background tool auto-install (own channel so it never blocks
+    // downloads; started once on launch when a sidecar is missing).
+    tool_rx: Option<std::sync::mpsc::Receiver<youtube::YtEvent>>,
+    tool_busy: bool,
+    tools_auto_started: bool,
     // Library gallery (Lively-style tab).
     tab: Tab,
     favorites: std::collections::HashSet<String>,
@@ -368,6 +373,9 @@ impl Default for App {
             ytdlp_path: None,
             ytdlp_ver: None,
             ffmpeg_path: None,
+            tool_rx: None,
+            tool_busy: false,
+            tools_auto_started: false,
             tab: Tab::Settings,
             favorites: saved.favorites.into_iter().collect(),
             lib_search: String::new(),
@@ -528,7 +536,12 @@ impl App {
             return;
         }
         let Some(exe) = self.ytdlp_path.clone() else {
-            self.yt_status = i18n::tr(self.lang, "yt_need_tool");
+            // Auto-install still running? Tell the user to wait a moment.
+            if self.tool_busy {
+                self.yt_status = i18n::tr(self.lang, "yt_auto_setup");
+            } else {
+                self.yt_status = i18n::tr(self.lang, "yt_need_tool");
+            }
             return;
         };
         if self.yt_busy {
@@ -612,10 +625,17 @@ impl App {
         ctx.request_repaint();
     }
 
-    /// Drain YouTube worker events (progress, playlist, done, errors).
+    /// Drain YouTube worker events (progress, playlist, done, errors)
+    /// plus background tool auto-install events. Missing sidecars are
+    /// installed automatically once on launch so the user never has to
+    /// click Get yt-dlp / Get ffmpeg by hand.
     fn poll_yt_events(&mut self, ctx: &egui::Context) {
         if !self.yt_tools_scanned {
             self.rescan_tools();
+        }
+        if !self.tools_auto_started {
+            self.tools_auto_started = true;
+            self.auto_install_missing_tools(ctx);
         }
         let events: Vec<youtube::YtEvent> = self
             .yt_rx
@@ -676,6 +696,95 @@ impl App {
                 }
             }
         }
+        // Background tool installs share one channel (both workers can
+        // send to clones of the same tx); drain them here so yt_busy for
+        // real downloads is never disturbed.
+        let tool_events: Vec<youtube::YtEvent> = self
+            .tool_rx
+            .as_ref()
+            .map(|rx| {
+                let mut out = Vec::new();
+                while let Ok(ev) = rx.try_recv() {
+                    out.push(ev);
+                }
+                out
+            })
+            .unwrap_or_default();
+        for ev in tool_events {
+            match ev {
+                youtube::YtEvent::Tool { key, arg } => {
+                    self.rescan_tools();
+                    self.yt_status = i18n::trf(self.lang, key, &[("v", &arg)]);
+                    if self.ytdlp_path.is_some() && self.ffmpeg_path.is_some() {
+                        self.tool_busy = false;
+                        self.tool_rx = None;
+                    } else if key == "yt_ready" || key == "yt_updated" {
+                        // yt-dlp done, ffmpeg may still be running.
+                        if self.ytdlp_path.is_some() && self.tool_rx.is_some() {
+                            self.yt_status = i18n::tr(self.lang, "yt_dling_ffmpeg");
+                        }
+                    }
+                    if self.ytdlp_path.is_some() && self.ffmpeg_path.is_some() {
+                        // Both ready — leave the success line visible.
+                    }
+                }
+                youtube::YtEvent::Error(code) => {
+                    self.yt_status = youtube::error_text(self.lang, &code);
+                    self.tool_busy = false;
+                    self.tool_rx = None;
+                }
+                // Downloads never run on the tool channel; ignore the rest.
+                _ => {}
+            }
+        }
+        if self.tool_rx.is_some() {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Start background install of every missing sidecar (yt-dlp, ffmpeg).
+    /// Called once on launch; manual Get buttons reuse the same channel.
+    fn auto_install_missing_tools(&mut self, ctx: &egui::Context) {
+        let need_ytdlp = self.ytdlp_path.is_none();
+        let need_ffmpeg = self.ffmpeg_path.is_none();
+        if !need_ytdlp && !need_ffmpeg {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tool_rx = Some(rx);
+        self.tool_busy = true;
+        if need_ytdlp {
+            youtube::spawn_provision_ytdlp(tx.clone());
+        }
+        if need_ffmpeg {
+            youtube::spawn_provision_ffmpeg(tx);
+        }
+        // Only overwrite an empty status — never hide a real message.
+        if self.yt_status.is_empty() {
+            self.yt_status = i18n::tr(self.lang, "yt_auto_setup");
+        }
+        ctx.request_repaint();
+    }
+
+    /// Manual (or re-try) install of one sidecar on the tool channel.
+    fn start_tool_install(&mut self, ctx: &egui::Context, tool: &str) {
+        let (tx, rx) = if self.tool_rx.is_some() {
+            // Already installing — reuse is impossible (rx taken), so
+            // just ignore extra clicks while busy.
+            return;
+        } else {
+            std::sync::mpsc::channel()
+        };
+        self.tool_rx = Some(rx);
+        self.tool_busy = true;
+        if tool == "ffmpeg" {
+            self.yt_status = i18n::tr(self.lang, "yt_dling_ffmpeg");
+            youtube::spawn_provision_ffmpeg(tx);
+        } else {
+            self.yt_status = i18n::tr(self.lang, "yt_dling_ytdlp");
+            youtube::spawn_provision_ytdlp(tx);
+        }
+        ctx.request_repaint();
     }
 
     /// Rescan the downloads folder and (re)build thumbnails. Images load
@@ -771,7 +880,8 @@ impl App {
         if !self.yt_status.is_empty() {
             ui.label(&self.yt_status);
         }
-        // Sidecar tools: one-click install/update so it works out of box.
+        // Sidecar tools: auto-installed on launch (see poll_yt_events);
+        // buttons below are only a manual retry / update.
         ui.horizontal_wrapped(|ui| {
             match (&self.ytdlp_path, &self.ytdlp_ver) {
                 (Some(_), Some(v)) => {
@@ -781,26 +891,24 @@ impl App {
                     ui.label(i18n::tr(self.lang, "tool_ytdlp_found"));
                 }
                 (None, _) => {
-                    ui.label(i18n::tr(self.lang, "tool_ytdlp_missing"));
+                    if self.tool_busy {
+                        ui.spinner();
+                        ui.label(i18n::tr(self.lang, "yt_dling_ytdlp"));
+                    } else {
+                        ui.label(i18n::tr(self.lang, "tool_ytdlp_missing"));
+                    }
                 }
             }
-            if !self.yt_busy {
+            if self.tool_rx.is_none() {
                 if self.ytdlp_path.is_none() {
                     if ui.button(i18n::tr(self.lang, "btn_get_ytdlp")).clicked() {
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        self.yt_rx = Some(rx);
-                        self.yt_busy = true;
-                        self.yt_progress = 0.0;
-                        self.yt_status = i18n::tr(self.lang, "yt_dling_ytdlp");
-                        youtube::spawn_provision_ytdlp(tx);
-                        ctx.request_repaint();
+                        self.start_tool_install(ctx, "ytdlp");
                     }
                 } else if ui.button(i18n::tr(self.lang, "btn_update")).clicked() {
                     if let Some(exe) = self.ytdlp_path.clone() {
                         let (tx, rx) = std::sync::mpsc::channel();
-                        self.yt_rx = Some(rx);
-                        self.yt_busy = true;
-                        self.yt_progress = 0.0;
+                        self.tool_rx = Some(rx);
+                        self.tool_busy = true;
                         self.yt_status = i18n::tr(self.lang, "yt_updating");
                         youtube::spawn_ytdlp_update(exe, tx);
                         ctx.request_repaint();
@@ -810,15 +918,14 @@ impl App {
             if self.ffmpeg_path.is_some() {
                 ui.label(i18n::tr(self.lang, "tool_ffmpeg_ok"));
             } else {
+                if self.tool_busy {
+                    ui.spinner();
+                }
                 ui.label(i18n::tr(self.lang, "tool_ffmpeg_missing"));
-                if !self.yt_busy && ui.button(i18n::tr(self.lang, "btn_get_ffmpeg")).clicked() {
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    self.yt_rx = Some(rx);
-                    self.yt_busy = true;
-                    self.yt_progress = 0.0;
-                    self.yt_status = i18n::tr(self.lang, "yt_dling_ffmpeg");
-                    youtube::spawn_provision_ffmpeg(tx);
-                    ctx.request_repaint();
+                if self.tool_rx.is_none()
+                    && ui.button(i18n::tr(self.lang, "btn_get_ffmpeg")).clicked()
+                {
+                    self.start_tool_install(ctx, "ffmpeg");
                 }
             }
         });

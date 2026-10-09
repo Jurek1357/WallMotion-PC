@@ -5,10 +5,10 @@
 //! drove the `yt_dlp` *Python module* frozen at build time — it went
 //! stale within weeks and every old release shipped a dead downloader.
 //! Here we drive the official standalone `yt-dlp` executable, stored in
-//! a `tools/` dir next to the downloads folder, with one-click install
-//! (`Get yt-dlp` pulls the official build from GitHub) and one-click
-//! self-update (`yt-dlp -U`). `ffmpeg` is optional: without it we
-//! download single-file formats (typically max ~720p); with it we get
+//! a `tools/` dir next to the downloads folder, auto-installed on first
+//! launch (both `yt-dlp` and `ffmpeg`) with manual retry buttons plus
+//! one-click self-update (`yt-dlp -U`). `ffmpeg` is optional: without it
+//! we download single-file formats (typically max ~720p); with it we get
 //! merged 1080p H.264.
 //!
 //! Only std + wallmotion-core. Downloads use `curl.exe` (ships with

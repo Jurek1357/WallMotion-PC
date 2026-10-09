@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-09
+
+### Added
+- yt-dlp + ffmpeg auto-install on first launch (background, no clicks
+  needed); the Get buttons stay as manual retry, Update stays for yt-dlp.
+- Live wallpaper preview card in Settings (video frames via ffmpeg),
+  with file name, play state and Set / Pause / Stop actions.
+- Windows autostart: "Start with Windows" checkbox (Run registry value
+  launching hidden with `--minimized`, resuming the last wallpaper).
+- `--minimized` CLI flag: start hidden to the tray and resume playback.
+- Wallpaper-Engine style side panels: controls left / preview right in
+  Settings, grid left / detail right in the library (stacked under
+  560 px); Sound / Rotation / YouTube cards are collapsible.
+
+### Changed
+- Settings reorganized into cards (Preview, Source, Sound & behavior,
+  Rotation, YouTube); file picker shows the name only (full path in
+  tooltip), volume slider fills the row, full-width Download / Cancel.
+- Library count shows the folder name (full path in tooltip); cards have
+  fills, fixed thumbnails and truncated names; single weak status line.
+
 ## [1.1.0] - 2026-10-08
 
 ### Added

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-09
+
+### Added
+- Rotation advances on video end (no timer); images dwell on the saved
+  interval, broken files are skipped, the last video loops.
+- Windows autostart checkbox (Run key, hidden `--minimized` resume).
+- `--minimized` CLI flag: start hidden to the tray and resume playback.
+- Live wallpaper preview card in Settings; controls left / preview
+  right on wide windows (stacked when narrow).
+- Collapsible Sound / Rotation / YouTube cards; single-instance port
+  gate (a second launch exits instead of forking a duplicate).
+
+### Changed
+- Video switches reuse the same canvas (no teardown flash); mute is
+  global again (only volume is remembered per file).
+- Hide-to-tray keeps the UI loop alive off-screen with no taskbar
+  button (Wallpaper-Engine style); rotation keeps playing while hidden.
+- Library cards share one thumbnail box size; bigger CTA buttons and
+  more readable texts; wide default window (940 px).
+
+### Fixed
+- Opaque WorkerW backgrounds covering the video (z-order watchdog
+  re-pins the canvas below the icons).
+- Duplicate app instances fighting over the desktop.
+
 ## [1.1.1] - 2026-10-09
 
 ### Added

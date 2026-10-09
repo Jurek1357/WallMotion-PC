@@ -12,10 +12,13 @@ pub struct CliArgs {
     pub muted: Option<bool>,
     pub volume: Option<u8>,
     pub version: bool,
+    /// Start hidden to the tray and resume the last wallpaper (used by
+    /// the Windows autostart Run value; never sent to a running instance).
+    pub minimized: bool,
 }
 
 pub fn usage() -> &'static str {
-    "wallmotion-settings [--set FILE] [--stop] [--mute|--unmute] [--volume 0-100] [--version]"
+    "wallmotion-settings [--set FILE] [--stop] [--mute|--unmute] [--volume 0-100] [--minimized] [--version]"
 }
 
 /// Parse CLI args (without the program name). Err = usage error message.
@@ -53,6 +56,7 @@ pub fn parse_args(argv: &[String]) -> Result<CliArgs, String> {
                 out.volume = Some(n.clamp(0, 100) as u8);
             }
             "--version" => out.version = true,
+            "--minimized" => out.minimized = true,
             other => return Err(format!("unknown argument: {other}")),
         }
         i += 1;
@@ -148,5 +152,14 @@ mod tests {
     #[test]
     fn version_flag() {
         assert!(parse_args(&argv(&["--version"])).unwrap().version);
+    }
+
+    #[test]
+    fn minimized_flag() {
+        // Local-only: never becomes a remote command.
+        let args = parse_args(&argv(&["--minimized"])).unwrap();
+        assert!(args.minimized);
+        assert!(!has_action(&args));
+        assert_eq!(args_to_command(&args), serde_json::json!({}));
     }
 }

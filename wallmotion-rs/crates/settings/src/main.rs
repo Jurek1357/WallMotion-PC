@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
 
+mod autostart;
 mod cli;
 mod config;
 mod i18n;
@@ -222,6 +223,9 @@ struct App {
     // `file` changes; videos use the ffmpeg frame cache).
     preview_path: String,
     preview_tex: Option<egui::TextureHandle>,
+    // Windows autostart (Run key) + hidden logon start (`--minimized`).
+    autostart: bool,
+    start_hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -229,6 +233,16 @@ enum Tab {
     #[default]
     Settings,
     Library,
+}
+
+/// Library gallery actions (grid clicks + detail buttons), applied by
+/// `library_tab` after both columns render.
+enum LibAction {
+    Select(String),
+    Set(String),
+    AddRot(String),
+    Delete(String),
+    ToggleFav(String),
 }
 
 #[derive(Debug, Clone)]
@@ -394,6 +408,8 @@ impl Default for App {
             logo: None,
             preview_path: String::new(),
             preview_tex: None,
+            autostart: autostart::is_enabled(),
+            start_hidden: false,
         }
     }
 }
@@ -878,6 +894,243 @@ impl App {
         }
     }
 
+    /// Settings control cards (source, sound, rotation, YouTube) shared
+    /// by the wide two-column layout (left column) and the narrow
+    /// stacked layout.
+    fn settings_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let dark = self.applied_style.unwrap_or(true);
+        card_frame(dark).show(ui, |ui| {
+            card_title(ui, i18n::tr(self.lang, "source_title"));
+            ui.horizontal(|ui| {
+                if ui.button(i18n::tr(self.lang, "browse")).clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter(
+                            "images & video",
+                            &[
+                                "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv", "webm", "avi",
+                                "mov",
+                            ],
+                        )
+                        .pick_file()
+                    {
+                        self.file = path.to_string_lossy().into_owned();
+                        self.apply_volume_memory();
+                        self.persist();
+                    }
+                }
+                let name = display_file_name(&self.file);
+                if name.is_empty() {
+                    ui.label(egui::RichText::new(i18n::tr(self.lang, "file_hint")).weak());
+                } else {
+                    ui.label(egui::RichText::new(truncate_middle(&name, 48)).strong())
+                        .on_hover_text(self.file.clone());
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(i18n::tr(self.lang, "monitor_label"));
+                let current = if self.monitor.is_empty() {
+                    i18n::tr(self.lang, "monitor_all")
+                } else {
+                    self.monitors
+                        .iter()
+                        .find(|m| m.name == self.monitor)
+                        .map(|m| m.label.clone())
+                        .unwrap_or_else(|| self.monitor.clone())
+                };
+                egui::ComboBox::from_id_salt("monitor")
+                    .selected_text(current)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_value(
+                                &mut self.monitor,
+                                String::new(),
+                                i18n::tr(self.lang, "monitor_all"),
+                            )
+                            .changed()
+                        {
+                            self.persist();
+                        }
+                        for m in self.monitors.clone() {
+                            if ui
+                                .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
+                                .changed()
+                            {
+                                self.persist();
+                            }
+                        }
+                    });
+                if ui.button(i18n::tr(self.lang, "refresh")).clicked() {
+                    self.monitors = discover_monitors(self.lang);
+                }
+            });
+            #[cfg(windows)]
+            {
+                let mut auto = self.autostart;
+                if ui
+                    .checkbox(&mut auto, i18n::tr(self.lang, "autostart"))
+                    .on_hover_text(i18n::tr(self.lang, "autostart_tip"))
+                    .changed()
+                {
+                    match autostart::set_enabled(auto) {
+                        Ok(()) => self.autostart = auto,
+                        Err(e) => {
+                            self.status = i18n::trf(self.lang, "autostart_err", &[("e", &e)]);
+                        }
+                    }
+                }
+            }
+        }); // source card
+        ui.add_space(8.0);
+        card_frame(dark).show(ui, |ui| {
+            egui::CollapsingHeader::new(i18n::tr(self.lang, "sound_title"))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .checkbox(&mut self.muted, i18n::tr(self.lang, "mute_short"))
+                            .changed()
+                        {
+                            self.apply_mute_volume();
+                            self.persist();
+                        }
+                        ui.label(i18n::tr(self.lang, "volume_label"));
+                        let w = (ui.available_width() - 52.0).max(80.0);
+                        if ui
+                            .add_sized(
+                                egui::vec2(w, 0.0),
+                                egui::Slider::new(&mut self.volume, 0..=100).show_value(false),
+                            )
+                            .changed()
+                        {
+                            self.apply_mute_volume();
+                            self.persist();
+                        }
+                        ui.label(format!("{}%", self.volume));
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut self.pause_on_fullscreen,
+                                i18n::tr(self.lang, "pause_fullscreen"),
+                            )
+                            .changed()
+                        {
+                            self.auto
+                                .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.persist();
+                        }
+                        if ui
+                            .checkbox(
+                                &mut self.pause_on_battery,
+                                i18n::tr(self.lang, "pause_battery"),
+                            )
+                            .changed()
+                        {
+                            self.auto
+                                .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.persist();
+                        }
+                    });
+                });
+        }); // sound card
+        ui.add_space(8.0);
+        card_frame(dark).show(ui, |ui| {
+            egui::CollapsingHeader::new(i18n::tr(self.lang, "rotation_title"))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut self.rotation_enabled,
+                                i18n::tr(self.lang, "rotation_enable"),
+                            )
+                            .changed()
+                        {
+                            self.last_rotation = std::time::Instant::now();
+                            self.persist();
+                        }
+                        ui.label(i18n::tr(self.lang, "rotation_interval"));
+                        egui::ComboBox::from_id_salt("rot_interval")
+                            .selected_text(wallmotion_core::rotation::format_interval(
+                                self.rotation_interval,
+                            ))
+                            .show_ui(ui, |ui| {
+                                for &secs in wallmotion_core::rotation::INTERVALS {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.rotation_interval,
+                                            secs,
+                                            wallmotion_core::rotation::format_interval(secs),
+                                        )
+                                        .changed()
+                                    {
+                                        self.last_rotation = std::time::Instant::now();
+                                        self.persist();
+                                    }
+                                }
+                            });
+                        let mut shuffle = self.rotation.shuffle();
+                        if ui
+                            .checkbox(&mut shuffle, i18n::tr(self.lang, "rotation_shuffle"))
+                            .changed()
+                        {
+                            self.rotation.set_shuffle(shuffle);
+                            self.persist();
+                        }
+                        let mut repeat = self.rotation.repeat();
+                        if ui
+                            .checkbox(&mut repeat, i18n::tr(self.lang, "rotation_repeat"))
+                            .changed()
+                        {
+                            self.rotation.set_repeat(repeat);
+                            self.persist();
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(i18n::tr(self.lang, "rotation_add")).clicked()
+                            && PathBuf::from(self.file.trim()).is_file()
+                        {
+                            self.rotation.add(self.file.trim());
+                            self.persist();
+                        }
+                        if ui.button(i18n::tr(self.lang, "rotation_play")).clicked() {
+                            self.rotation_enabled = true;
+                            if let Some(path) = self.rotation.restart() {
+                                self.play_rotation_path(path);
+                            } else {
+                                self.persist();
+                            }
+                        }
+                        ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
+                            if ui.button(i18n::tr(self.lang, "rotation_skip")).clicked() {
+                                if let Some(path) = self.rotation.next_file() {
+                                    self.play_rotation_path(path);
+                                }
+                            }
+                        });
+                        if ui.button(i18n::tr(self.lang, "rotation_clear")).clicked() {
+                            self.rotation.clear();
+                            self.rotation_enabled = false;
+                            self.persist();
+                        }
+                        ui.label(i18n::trf(
+                            self.lang,
+                            "rotation_count",
+                            &[("n", &self.rotation.len().to_string())],
+                        ));
+                    });
+                });
+        }); // rotation card
+        ui.add_space(8.0);
+        card_frame(dark).show(ui, |ui| {
+            egui::CollapsingHeader::new(i18n::tr(self.lang, "yt_title"))
+                .default_open(true)
+                .show(ui, |ui| {
+                    self.youtube_section(ui, ctx);
+                });
+        }); // youtube card
+    }
+
     /// Preview card: live thumbnail of the current wallpaper, file name +
     /// play state, and the main Set / Pause / Stop actions (Lively-style).
     fn preview_card(&mut self, ui: &mut egui::Ui) {
@@ -959,7 +1212,6 @@ impl App {
     /// YouTube section: URL box, tool provisioning, progress, picker.
     fn youtube_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let dark = self.applied_style.unwrap_or(true);
-        card_title(ui, i18n::tr(self.lang, "yt_title"));
         let url_entered = ui
             .add(
                 egui::TextEdit::singleline(&mut self.yt_url)
@@ -1116,7 +1368,9 @@ impl App {
     /// Wallpaper library tab: search + favorites filter, thumbnail grid
     /// on the left, detail panel (preview, actions) on the right.
     /// Lively-style layout (replaces the old inline row list).
-    fn library_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    /// Library grid (search + cards). Left column in wide mode, top in
+    /// narrow mode. Returns the click action, if any.
+    fn library_grid(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> Option<LibAction> {
         ui.add(
             egui::TextEdit::singleline(&mut self.lib_search)
                 .hint_text(i18n::tr(self.lang, "library_search"))
@@ -1168,22 +1422,8 @@ impl App {
             })
             .cloned()
             .collect();
-        // Drop the selection when its file vanished.
-        if let Some(sel) = &self.lib_selected {
-            if !self.library.iter().any(|it| &it.name == sel) {
-                self.lib_selected = None;
-            }
-        }
-        enum LibAction {
-            Select(String),
-            Set(String),
-            AddRot(String),
-            Delete(String),
-            ToggleFav(String),
-        }
         let mut action: Option<LibAction> = None;
-        // Responsive grid: columns follow the window width, rows flow
-        // down with the page scroll (no nested scroll area).
+        // Responsive grid: columns follow the column width, rows flow down.
         let dark = self.applied_style.unwrap_or(true);
         let avail = ui.available_width().max(100.0);
         let card_w = avail.clamp(110.0, 160.0);
@@ -1266,8 +1506,14 @@ impl App {
                     }
                 }
             });
-        ui.add_space(4.0);
-        // Detail panel for the selected wallpaper.
+        action
+    }
+
+    /// Library detail panel for the selected wallpaper. Right column in
+    /// wide mode, below the grid in narrow mode.
+    fn library_detail(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) -> Option<LibAction> {
+        let dark = self.applied_style.unwrap_or(true);
+        let mut action: Option<LibAction> = None;
         let detail: Option<library::MediaItem> = self
             .lib_selected
             .as_ref()
@@ -1336,6 +1582,33 @@ impl App {
             }
             None => {
                 ui.label(egui::RichText::new(i18n::tr(self.lang, "lib_empty_pick")).weak());
+            }
+        }
+        action
+    }
+
+    fn library_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        // Drop the selection when its file vanished.
+        if let Some(sel) = &self.lib_selected {
+            if !self.library.iter().any(|it| &it.name == sel) {
+                self.lib_selected = None;
+            }
+        }
+        let mut action: Option<LibAction> = None;
+        // Wallpaper-Engine style: grid left, detail panel right.
+        // Narrow windows keep the stacked layout.
+        if ui.available_width() > 560.0 {
+            ui.columns(2, |uis| {
+                action = self.library_grid(&mut uis[0], ctx);
+                if action.is_none() {
+                    action = self.library_detail(&mut uis[1], ctx);
+                }
+            });
+        } else {
+            action = self.library_grid(ui, ctx);
+            ui.add_space(4.0);
+            if action.is_none() {
+                action = self.library_detail(ui, ctx);
             }
         }
         match action {
@@ -1652,6 +1925,26 @@ impl eframe::App for App {
                 self.logo = Some(ctx.load_texture("app-logo", img, egui::TextureOptions::LINEAR));
             }
         }
+        // `--minimized` (autostart logon): hide like X did (tray keeps
+        // running) and resume the saved wallpaper without popping up.
+        // Runs on the first frame, before any paint, so nothing flashes.
+        if self.start_hidden {
+            self.start_hidden = false;
+            #[cfg(windows)]
+            {
+                if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                    APP_HWND.store(find_app_hwnd(), std::sync::atomic::Ordering::SeqCst);
+                }
+                hide_app_window();
+            }
+            #[cfg(not(windows))]
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            if PathBuf::from(self.file.trim()).is_file() {
+                self.set_wallpaper();
+            }
+        }
         // X/red close hides to tray (video keeps playing, tray icon
         // stays so the app can be reopened); only the tray Quit action
         // lets the close proceed (on_exit stops video).
@@ -1751,221 +2044,24 @@ impl eframe::App for App {
                 });
                 ui.separator();
                 if self.tab == Tab::Settings {
-                    let dark = self.applied_style.unwrap_or(true);
-                    card_frame(dark).show(ui, |ui| {
-                        self.preview_card(ui);
-                    }); // preview card
-                    ui.add_space(8.0);
-                    card_frame(dark).show(ui, |ui| {
-                        card_title(ui, i18n::tr(self.lang, "source_title"));
-                        ui.horizontal(|ui| {
-                            if ui.button(i18n::tr(self.lang, "browse")).clicked() {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .add_filter(
-                                        "images & video",
-                                        &[
-                                            "jpg", "jpeg", "png", "bmp", "gif", "mp4", "mkv",
-                                            "webm", "avi", "mov",
-                                        ],
-                                    )
-                                    .pick_file()
-                                {
-                                    self.file = path.to_string_lossy().into_owned();
-                                    self.apply_volume_memory();
-                                    self.persist();
-                                }
-                            }
-                            let name = display_file_name(&self.file);
-                            if name.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(i18n::tr(self.lang, "file_hint")).weak(),
-                                );
-                            } else {
-                                ui.label(egui::RichText::new(truncate_middle(&name, 48)).strong())
-                                    .on_hover_text(self.file.clone());
-                            }
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(i18n::tr(self.lang, "monitor_label"));
-                            let current = if self.monitor.is_empty() {
-                                i18n::tr(self.lang, "monitor_all")
-                            } else {
-                                self.monitors
-                                    .iter()
-                                    .find(|m| m.name == self.monitor)
-                                    .map(|m| m.label.clone())
-                                    .unwrap_or_else(|| self.monitor.clone())
-                            };
-                            egui::ComboBox::from_id_salt("monitor")
-                                .selected_text(current)
-                                .show_ui(ui, |ui| {
-                                    if ui
-                                        .selectable_value(
-                                            &mut self.monitor,
-                                            String::new(),
-                                            i18n::tr(self.lang, "monitor_all"),
-                                        )
-                                        .changed()
-                                    {
-                                        self.persist();
-                                    }
-                                    for m in self.monitors.clone() {
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.monitor,
-                                                m.name.clone(),
-                                                &m.label,
-                                            )
-                                            .changed()
-                                        {
-                                            self.persist();
-                                        }
-                                    }
-                                });
-                            if ui.button(i18n::tr(self.lang, "refresh")).clicked() {
-                                self.monitors = discover_monitors(self.lang);
-                            }
-                        });
-                    }); // source card
-                    ui.add_space(8.0);
-                    card_frame(dark).show(ui, |ui| {
-                        card_title(ui, i18n::tr(self.lang, "sound_title"));
-                        ui.horizontal(|ui| {
-                            if ui
-                                .checkbox(&mut self.muted, i18n::tr(self.lang, "mute_short"))
-                                .changed()
-                            {
-                                self.apply_mute_volume();
-                                self.persist();
-                            }
-                            ui.label(i18n::tr(self.lang, "volume_label"));
-                            let w = (ui.available_width() - 52.0).max(80.0);
-                            if ui
-                                .add_sized(
-                                    egui::vec2(w, 0.0),
-                                    egui::Slider::new(&mut self.volume, 0..=100).show_value(false),
-                                )
-                                .changed()
-                            {
-                                self.apply_mute_volume();
-                                self.persist();
-                            }
-                            ui.label(format!("{}%", self.volume));
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            if ui
-                                .checkbox(
-                                    &mut self.pause_on_fullscreen,
-                                    i18n::tr(self.lang, "pause_fullscreen"),
-                                )
-                                .changed()
-                            {
-                                self.auto
-                                    .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                                self.persist();
-                            }
-                            if ui
-                                .checkbox(
-                                    &mut self.pause_on_battery,
-                                    i18n::tr(self.lang, "pause_battery"),
-                                )
-                                .changed()
-                            {
-                                self.auto
-                                    .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
-                                self.persist();
-                            }
-                        });
-                    }); // sound card
-                    ui.add_space(8.0);
-                    card_frame(dark).show(ui, |ui| {
-                        card_title(ui, i18n::tr(self.lang, "rotation_title"));
-                        ui.horizontal_wrapped(|ui| {
-                            if ui
-                                .checkbox(
-                                    &mut self.rotation_enabled,
-                                    i18n::tr(self.lang, "rotation_enable"),
-                                )
-                                .changed()
-                            {
-                                self.last_rotation = std::time::Instant::now();
-                                self.persist();
-                            }
-                            ui.label(i18n::tr(self.lang, "rotation_interval"));
-                            egui::ComboBox::from_id_salt("rot_interval")
-                                .selected_text(wallmotion_core::rotation::format_interval(
-                                    self.rotation_interval,
-                                ))
-                                .show_ui(ui, |ui| {
-                                    for &secs in wallmotion_core::rotation::INTERVALS {
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.rotation_interval,
-                                                secs,
-                                                wallmotion_core::rotation::format_interval(secs),
-                                            )
-                                            .changed()
-                                        {
-                                            self.last_rotation = std::time::Instant::now();
-                                            self.persist();
-                                        }
-                                    }
-                                });
-                            let mut shuffle = self.rotation.shuffle();
-                            if ui
-                                .checkbox(&mut shuffle, i18n::tr(self.lang, "rotation_shuffle"))
-                                .changed()
-                            {
-                                self.rotation.set_shuffle(shuffle);
-                                self.persist();
-                            }
-                            let mut repeat = self.rotation.repeat();
-                            if ui
-                                .checkbox(&mut repeat, i18n::tr(self.lang, "rotation_repeat"))
-                                .changed()
-                            {
-                                self.rotation.set_repeat(repeat);
-                                self.persist();
-                            }
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.button(i18n::tr(self.lang, "rotation_add")).clicked()
-                                && PathBuf::from(self.file.trim()).is_file()
-                            {
-                                self.rotation.add(self.file.trim());
-                                self.persist();
-                            }
-                            if ui.button(i18n::tr(self.lang, "rotation_play")).clicked() {
-                                self.rotation_enabled = true;
-                                if let Some(path) = self.rotation.restart() {
-                                    self.play_rotation_path(path);
-                                } else {
-                                    self.persist();
-                                }
-                            }
-                            ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
-                                if ui.button(i18n::tr(self.lang, "rotation_skip")).clicked() {
-                                    if let Some(path) = self.rotation.next_file() {
-                                        self.play_rotation_path(path);
-                                    }
-                                }
+                    // Wallpaper-Engine style: controls left, live preview
+                    // right. Narrow windows keep the stacked layout.
+                    if ui.available_width() > 560.0 {
+                        ui.columns(2, |uis| {
+                            self.settings_controls(&mut uis[0], ctx);
+                            let dark = self.applied_style.unwrap_or(true);
+                            card_frame(dark).show(&mut uis[1], |ui| {
+                                self.preview_card(ui);
                             });
-                            if ui.button(i18n::tr(self.lang, "rotation_clear")).clicked() {
-                                self.rotation.clear();
-                                self.rotation_enabled = false;
-                                self.persist();
-                            }
-                            ui.label(i18n::trf(
-                                self.lang,
-                                "rotation_count",
-                                &[("n", &self.rotation.len().to_string())],
-                            ));
                         });
-                    }); // rotation card
-                    ui.add_space(8.0);
-                    card_frame(dark).show(ui, |ui| {
-                        self.youtube_section(ui, ctx);
-                    }); // youtube card
+                    } else {
+                        let dark = self.applied_style.unwrap_or(true);
+                        card_frame(dark).show(ui, |ui| {
+                            self.preview_card(ui);
+                        });
+                        ui.add_space(8.0);
+                        self.settings_controls(ui, ctx);
+                    }
                 } else {
                     self.library_tab(ui, ctx);
                 }
@@ -2239,6 +2335,7 @@ fn main() {
             tray_menu_thread(cc.egui_ctx.clone());
             let mut app = App {
                 remote_rx,
+                start_hidden: args.minimized && !action,
                 ..Default::default()
             };
             if action {

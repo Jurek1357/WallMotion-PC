@@ -119,6 +119,12 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("preview_title", "Preview"),
             ("source_title", "Source"),
             ("sound_title", "Sound & behavior"),
+            ("autostart", "Start with Windows"),
+            (
+                "autostart_tip",
+                "Launch hidden to the tray at logon and resume the wallpaper",
+            ),
+            ("autostart_err", "Could not set startup: {e}"),
         ],
         Lang::Cs => &[
             (
@@ -188,6 +194,12 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("preview_title", "Náhled"),
             ("source_title", "Zdroj"),
             ("sound_title", "Zvuk a chování"),
+            ("autostart", "Spustit po startu Windows"),
+            (
+                "autostart_tip",
+                "Spustit skrytě do traye po přihlášení a obnovit tapetu",
+            ),
+            ("autostart_err", "Start po přihlášení se nepodařilo: {e}"),
         ],
     }
 }
@@ -296,6 +308,9 @@ mod tests {
             "preview_title",
             "source_title",
             "sound_title",
+            "autostart",
+            "autostart_tip",
+            "autostart_err",
             "rotation_title",
             "img_failed",
             "mon_name",

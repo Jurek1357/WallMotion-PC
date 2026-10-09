@@ -218,6 +218,10 @@ struct App {
     applied_style: Option<bool>,
     last_theme_poll: std::time::Instant,
     logo: Option<egui::TextureHandle>,
+    // Settings preview of the current wallpaper (rebuilt only when
+    // `file` changes; videos use the ffmpeg frame cache).
+    preview_path: String,
+    preview_tex: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -388,6 +392,8 @@ impl Default for App {
             applied_style: None,
             last_theme_poll: std::time::Instant::now(),
             logo: None,
+            preview_path: String::new(),
+            preview_tex: None,
         }
     }
 }
@@ -837,6 +843,117 @@ impl App {
             }
             self.persist();
         }
+    }
+
+    /// (Re)build the settings preview texture when the file changes.
+    /// Images load directly; videos use the ffmpeg frame cache (same as
+    /// the library grid). Cheap guard: returns immediately otherwise.
+    fn ensure_preview(&mut self, ctx: &egui::Context) {
+        let path = self.file.trim().to_string();
+        if self.preview_path == path {
+            return;
+        }
+        self.preview_path = path.clone();
+        self.preview_tex = None;
+        if path.is_empty() {
+            return;
+        }
+        let full = PathBuf::from(&path);
+        if !full.is_file() {
+            return;
+        }
+        let lower = path.to_lowercase();
+        let is_video = library::VIDEO_EXTS.iter().any(|e| lower.ends_with(e));
+        let source: Option<PathBuf> = if is_video {
+            library::ensure_video_thumb(&full, &library::thumbs_dir())
+        } else {
+            Some(full)
+        };
+        if let Some(src) = source {
+            if let Some((rgba, w, h)) = library::load_thumb_rgba(&src) {
+                let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                self.preview_tex =
+                    Some(ctx.load_texture("preview", img, egui::TextureOptions::LINEAR));
+            }
+        }
+    }
+
+    /// Preview card: live thumbnail of the current wallpaper, file name +
+    /// play state, and the main Set / Pause / Stop actions (Lively-style).
+    fn preview_card(&mut self, ui: &mut egui::Ui) {
+        card_title(ui, i18n::tr(self.lang, "preview_title"));
+        let thumb: Option<(egui::TextureId, f32, f32)> = self.preview_tex.as_ref().map(|tex| {
+            let s = tex.size_vec2();
+            (tex.id(), s.x, s.y)
+        });
+        if let Some((id, tw, th)) = thumb {
+            let avail = ui.available_width().max(80.0);
+            let mut w = avail.min(480.0);
+            let mut h = w * th / tw.max(1.0);
+            if h > 220.0 {
+                h = 220.0;
+                w = h * tw / th.max(1.0);
+            }
+            ui.horizontal(|ui| {
+                ui.add_space(((avail - w) / 2.0).max(0.0));
+                ui.image((id, egui::vec2(w, h)));
+            });
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.add_space(28.0);
+                ui.label(egui::RichText::new(i18n::tr(self.lang, "file_hint")).weak());
+                ui.add_space(28.0);
+            });
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let name = display_file_name(&self.file);
+            if !name.is_empty() {
+                ui.label(egui::RichText::new(truncate_middle(&name, 44)).strong())
+                    .on_hover_text(self.file.clone());
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let state = if self.running.is_some() {
+                    if self.paused {
+                        i18n::tr(self.lang, "status_paused")
+                    } else {
+                        i18n::tr(self.lang, "status_playing")
+                    }
+                } else {
+                    i18n::tr(self.lang, "status_stopped")
+                };
+                ui.label(egui::RichText::new(state).small().weak());
+            });
+        });
+        ui.add_space(4.0);
+        let dark = self.applied_style.unwrap_or(true);
+        if ui
+            .add_sized(
+                egui::vec2(ui.available_width().max(60.0), 0.0),
+                egui::Button::new(
+                    egui::RichText::new(i18n::tr(self.lang, "apply")).color(egui::Color32::WHITE),
+                )
+                .fill(accent_color(dark)),
+            )
+            .clicked()
+        {
+            self.set_wallpaper();
+        }
+        ui.horizontal_wrapped(|ui| {
+            let pause_label = if self.paused {
+                i18n::tr(self.lang, "video_resume")
+            } else {
+                i18n::tr(self.lang, "video_pause")
+            };
+            ui.add_enabled_ui(self.running.is_some(), |ui| {
+                if ui.button(pause_label).clicked() {
+                    self.toggle_pause();
+                }
+            });
+            if ui.button(i18n::tr(self.lang, "stop")).clicked() {
+                self.stop_video();
+            }
+        });
     }
 
     /// YouTube section: URL box, tool provisioning, progress, picker.
@@ -1509,6 +1626,8 @@ impl eframe::App for App {
         }
         // YouTube worker events (progress, playlist, done, tool installs).
         self.poll_yt_events(ctx);
+        // Settings preview thumbnail (rebuilt only when the file changes).
+        self.ensure_preview(ctx);
         // Theme: follow the OS (polled) or the manual sun button.
         if self.follow_system && self.last_theme_poll.elapsed() >= theme::POLL_INTERVAL {
             self.last_theme_poll = std::time::Instant::now();
@@ -1634,7 +1753,11 @@ impl eframe::App for App {
                 if self.tab == Tab::Settings {
                     let dark = self.applied_style.unwrap_or(true);
                     card_frame(dark).show(ui, |ui| {
-                        card_title(ui, i18n::tr(self.lang, "video_file"));
+                        self.preview_card(ui);
+                    }); // preview card
+                    ui.add_space(8.0);
+                    card_frame(dark).show(ui, |ui| {
+                        card_title(ui, i18n::tr(self.lang, "source_title"));
                         ui.horizontal(|ui| {
                             if ui.button(i18n::tr(self.lang, "browse")).clicked() {
                                 if let Some(path) = rfd::FileDialog::new()
@@ -1661,25 +1784,6 @@ impl eframe::App for App {
                                 ui.label(egui::RichText::new(truncate_middle(&name, 48)).strong())
                                     .on_hover_text(self.file.clone());
                             }
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            let dark = self.applied_style.unwrap_or(true);
-                            if accent_button(ui, dark, i18n::tr(self.lang, "apply")).clicked() {
-                                self.set_wallpaper();
-                            }
-                            if ui.button(i18n::tr(self.lang, "stop")).clicked() {
-                                self.stop_video();
-                            }
-                            let pause_label = if self.paused {
-                                i18n::tr(self.lang, "video_resume")
-                            } else {
-                                i18n::tr(self.lang, "video_pause")
-                            };
-                            ui.add_enabled_ui(self.running.is_some(), |ui| {
-                                if ui.button(pause_label).clicked() {
-                                    self.toggle_pause();
-                                }
-                            });
                         });
                         ui.horizontal_wrapped(|ui| {
                             ui.label(i18n::tr(self.lang, "monitor_label"));
@@ -1722,6 +1826,10 @@ impl eframe::App for App {
                                 self.monitors = discover_monitors(self.lang);
                             }
                         });
+                    }); // source card
+                    ui.add_space(8.0);
+                    card_frame(dark).show(ui, |ui| {
+                        card_title(ui, i18n::tr(self.lang, "sound_title"));
                         ui.horizontal(|ui| {
                             if ui
                                 .checkbox(&mut self.muted, i18n::tr(self.lang, "mute_short"))
@@ -1768,7 +1876,7 @@ impl eframe::App for App {
                                 self.persist();
                             }
                         });
-                    }); // video card
+                    }); // sound card
                     ui.add_space(8.0);
                     card_frame(dark).show(ui, |ui| {
                         card_title(ui, i18n::tr(self.lang, "rotation_title"));

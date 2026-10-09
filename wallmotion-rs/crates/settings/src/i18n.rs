@@ -116,6 +116,9 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("tool_nostart", "cannot start yt-dlp: {e}"),
             ("tool_blocked", "downloaded yt-dlp does not run (blocked?)"),
             ("dl_nofile", "file not found"),
+            ("preview_title", "Preview"),
+            ("source_title", "Source"),
+            ("sound_title", "Sound & behavior"),
         ],
         Lang::Cs => &[
             (
@@ -182,6 +185,9 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("tool_nostart", "yt-dlp se nepodařilo spustit: {e}"),
             ("tool_blocked", "stažený yt-dlp se nespustí (blokováno?)"),
             ("dl_nofile", "soubor se nenašel"),
+            ("preview_title", "Náhled"),
+            ("source_title", "Zdroj"),
+            ("sound_title", "Zvuk a chování"),
         ],
     }
 }
@@ -287,6 +293,9 @@ mod tests {
             "status_playing",
             "video_file",
             "file_hint",
+            "preview_title",
+            "source_title",
+            "sound_title",
             "rotation_title",
             "img_failed",
             "mon_name",

@@ -135,6 +135,118 @@ pub mod sys {
         unsafe { DestroyWindow(HWND(hwnd as _)).is_ok() }
     }
 
+    /// One-line desktop tree for swap diagnosis: Progman children as
+    /// `class:hend:visible:WxH` plus our canvases' z-neighbours.
+    /// Answers "where is our canvas really" without remote debugging.
+    /// Best effort, never panics.
+    pub fn debug_desktop_tree() -> String {
+        use crate::workerw::sys as ww;
+        use windows::core::PCWSTR;
+        let mut out = String::new();
+        let prog = match ww::progman() {
+            Some(p) => p,
+            None => return "progman=?".to_string(),
+        };
+        out.push_str("progchildren[");
+        unsafe {
+            let mut child =
+                FindWindowExW(Some(HWND(prog as _)), None, PCWSTR::null(), PCWSTR::null())
+                    .unwrap_or(HWND(0 as _));
+            let mut n = 0;
+            while !child.0.is_null() && n < 24 {
+                n += 1;
+                let mut cls = [0u16; 64];
+                let len = GetClassNameW(child, &mut cls) as usize;
+                let name = String::from_utf16_lossy(&cls[..len.min(64)]);
+                let vis = IsWindowVisible(child).as_bool() as u8;
+                let mut rect = RECT::default();
+                let geom = if GetWindowRect(child, &mut rect).is_ok() {
+                    format!("{}x{}", rect.right - rect.left, rect.bottom - rect.top)
+                } else {
+                    "?".to_string()
+                };
+                out.push_str(&format!("{name}:{:x}:{vis}:{geom} ", child.0 as isize));
+                child = FindWindowExW(
+                    Some(HWND(prog as _)),
+                    Some(child),
+                    PCWSTR::null(),
+                    PCWSTR::null(),
+                )
+                .unwrap_or(HWND(0 as _));
+            }
+            out.push(']');
+            // Our canvases anywhere under Progman (direct or inside a
+            // WorkerW): visibility + z-neighbours (prev = window above).
+            out.push_str(" our[");
+            // Collect parent windows: Progman itself + its WorkerW kids.
+            let mut parents = vec![HWND(prog as _)];
+            {
+                let mut w =
+                    FindWindowExW(Some(HWND(prog as _)), None, w!("WorkerW"), PCWSTR::null())
+                        .unwrap_or(HWND(0 as _));
+                let mut n = 0;
+                while !w.0.is_null() && n < 8 {
+                    n += 1;
+                    parents.push(w);
+                    w = FindWindowExW(
+                        Some(HWND(prog as _)),
+                        Some(w),
+                        w!("WorkerW"),
+                        PCWSTR::null(),
+                    )
+                    .unwrap_or(HWND(0 as _));
+                }
+            }
+            let mut m = 0;
+            for parent in parents {
+                let mut mine =
+                    FindWindowExW(Some(parent), None, w!("WallMotionCanvas"), PCWSTR::null())
+                        .unwrap_or(HWND(0 as _));
+                while !mine.0.is_null() && m < 8 {
+                    m += 1;
+                    let vis = IsWindowVisible(mine).as_bool() as u8;
+                    let prev = GetWindow(mine, GW_HWNDPREV)
+                        .map(|h| {
+                            let mut c = [0u16; 64];
+                            let l = GetClassNameW(h, &mut c) as usize;
+                            String::from_utf16_lossy(&c[..l.min(64)])
+                        })
+                        .unwrap_or_else(|_| "?".to_string());
+                    let next = GetWindow(mine, GW_HWNDNEXT)
+                        .map(|h| {
+                            let mut c = [0u16; 64];
+                            let l = GetClassNameW(h, &mut c) as usize;
+                            String::from_utf16_lossy(&c[..l.min(64)])
+                        })
+                        .unwrap_or_else(|_| "?".to_string());
+                    out.push_str(&format!(
+                        "{:x}:v{vis}:above={prev}:below={next} ",
+                        mine.0 as isize
+                    ));
+                    mine = FindWindowExW(
+                        Some(parent),
+                        Some(mine),
+                        w!("WallMotionCanvas"),
+                        PCWSTR::null(),
+                    )
+                    .unwrap_or(HWND(0 as _));
+                }
+            }
+            out.push(']');
+        }
+        out
+    }
+
+    /// Show or hide a canvas without destroying it. Hidden canvases keep
+    /// their mpv painting (used for pre-roll: the new video starts
+    /// hidden while the old one keeps playing, then they swap).
+    pub fn set_canvas_visible(hwnd: isize, visible: bool) -> bool {
+        unsafe {
+            let _ = ShowWindow(HWND(hwnd as _), if visible { SW_SHOW } else { SW_HIDE });
+        }
+        true
+    }
+
     /// Move the canvas right below `after` (icons stay on top).
     pub fn place_below(hwnd: isize, after: isize) -> bool {
         unsafe {
@@ -151,9 +263,167 @@ pub mod sys {
         }
     }
 
+    /// Find the desktop icon view (DefView): direct Progman child on
+    /// some layouts, else inside a Progman-child WorkerW. Best effort.
+    pub fn find_defview() -> Option<isize> {
+        use crate::workerw::sys as ww;
+        use windows::core::PCWSTR;
+        unsafe {
+            let prog = HWND(ww::progman()? as _);
+            let direct = FindWindowExW(Some(prog), None, w!("SHELLDLL_DefView"), PCWSTR::null())
+                .map(|h| h.0 as isize)
+                .unwrap_or(0);
+            if direct != 0 {
+                return Some(direct);
+            }
+            let mut w = FindWindowExW(Some(prog), None, w!("WorkerW"), PCWSTR::null())
+                .unwrap_or(HWND(0 as _));
+            while !w.0.is_null() {
+                let dv = FindWindowExW(Some(w), None, w!("SHELLDLL_DefView"), PCWSTR::null())
+                    .map(|h| h.0 as isize)
+                    .unwrap_or(0);
+                if dv != 0 {
+                    return Some(dv);
+                }
+                w = FindWindowExW(Some(prog), Some(w), w!("WorkerW"), PCWSTR::null())
+                    .unwrap_or(HWND(0 as _));
+            }
+            None
+        }
+    }
+
+    /// Keep our canvas right below the desktop icons. Opaque WorkerW
+    /// backgrounds drift above it otherwise: audio keeps playing while
+    /// the video vanishes behind the original wallpaper. No-op unless
+    /// misordered (or different parents). Best effort, cheap: call it
+    /// after every swap plus throttled from the UI loop.
+    pub fn ensure_below_defview(canvas: isize) -> bool {
+        if canvas_below_defview(canvas) {
+            return true;
+        }
+        let defview = match find_defview() {
+            Some(d) => d,
+            None => return false,
+        };
+        place_below(canvas, defview)
+    }
+
+    /// True when `canvas` already sits right below the desktop icons
+    /// (same sibling list). Used to log only real reorderings.
+    pub fn canvas_below_defview(canvas: isize) -> bool {
+        unsafe {
+            let defview = match find_defview() {
+                Some(d) => d,
+                None => return false,
+            };
+            let parent = GetParent(HWND(canvas as _)).map(|h| h.0 as isize).ok();
+            if parent != GetParent(HWND(defview as _)).map(|h| h.0 as isize).ok() {
+                return false;
+            }
+            GetWindow(HWND(canvas as _), GW_HWNDPREV)
+                .map(|h| h.0 as isize == defview)
+                .unwrap_or(false)
+        }
+    }
+
     /// Move `other` right below the canvas (used for WorkerW once).
     pub fn place_other_below_canvas(other: isize, canvas: isize) -> bool {
         place_below(other, canvas)
+    }
+
+    /// Paint the canvas black (fresh pre-roll baseline: the brightness
+    /// probe below only fires on real video frames, never on stale
+    /// leftovers). Best effort.
+    pub fn clear_canvas(hwnd: isize) -> bool {
+        unsafe {
+            let hdc = GetDC(Some(HWND(hwnd as _)));
+            if hdc.is_invalid() {
+                return false;
+            }
+            let mut rect = RECT::default();
+            let ok = GetWindowRect(HWND(hwnd as _), &mut rect).is_ok();
+            let brush = CreateSolidBrush(COLORREF(0));
+            let painted = ok && !brush.is_invalid() && FillRect(hdc, &rect, brush) != 0;
+            if !brush.is_invalid() {
+                let _ = DeleteObject(brush.into());
+            }
+            ReleaseDC(Some(HWND(hwnd as _)), hdc);
+            painted
+        }
+    }
+
+    /// Mean luma (0-255) of a small canvas capture. Tells a painting
+    /// video apart from a black/unpainted canvas so swaps happen on the
+    /// first real frame instead of a fixed delay. `None` on any failure
+    /// (caller falls back to the timeout). Never panics.
+    pub fn canvas_brightness(hwnd: isize) -> Option<f64> {
+        const W: i32 = 48;
+        const H: i32 = 27;
+        unsafe {
+            let src = GetDC(Some(HWND(hwnd as _)));
+            if src.is_invalid() {
+                return None;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(HWND(hwnd as _), &mut rect).is_err() {
+                ReleaseDC(Some(HWND(hwnd as _)), src);
+                return None;
+            }
+            let (fw, fh) = (
+                (rect.right - rect.left).max(1),
+                (rect.bottom - rect.top).max(1),
+            );
+            let dst = CreateCompatibleDC(Some(src));
+            if dst.is_invalid() {
+                ReleaseDC(Some(HWND(hwnd as _)), src);
+                return None;
+            }
+            let bmp = CreateCompatibleBitmap(src, W, H);
+            if bmp.is_invalid() {
+                let _ = DeleteDC(dst);
+                ReleaseDC(Some(HWND(hwnd as _)), src);
+                return None;
+            }
+            let old = SelectObject(dst, bmp.into());
+            let blitted = StretchBlt(dst, 0, 0, W, H, Some(src), 0, 0, fw, fh, SRCCOPY).as_bool();
+            SelectObject(dst, old);
+            let out = if !blitted {
+                None
+            } else {
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = W;
+                bmi.bmiHeader.biHeight = -H; // top-down
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB.0;
+                let mut px = vec![0u8; (W * H * 4) as usize];
+                let got = GetDIBits(
+                    dst,
+                    bmp,
+                    0,
+                    H as u32,
+                    Some(px.as_mut_ptr().cast()),
+                    &mut bmi,
+                    DIB_RGB_COLORS,
+                );
+                if got == 0 {
+                    None
+                } else {
+                    let mut sum = 0u64;
+                    let (quads, _) = px.as_chunks::<4>();
+                    for p in quads {
+                        // BGRA: luma from BGR.
+                        sum += (p[0] as u64 * 114 + p[1] as u64 * 587 + p[2] as u64 * 299) / 1000;
+                    }
+                    Some(sum as f64 / (W * H) as f64)
+                }
+            };
+            let _ = DeleteObject(bmp.into());
+            let _ = DeleteDC(dst);
+            ReleaseDC(Some(HWND(hwnd as _)), src);
+            out
+        }
     }
 
     /// Paint an animated test pattern (vertical bands). Demo/test only.
@@ -338,6 +608,44 @@ pub mod sys {
             for frame in 0..3u32 {
                 assert!(paint_test_pattern(hwnd, 64, 64, frame));
             }
+            assert!(destroy_canvas(hwnd));
+        }
+
+        #[test]
+        fn smoke_hide_show() {
+            let spec = CanvasSpec {
+                x: 0,
+                y: 0,
+                w: 64,
+                h: 64,
+                parent: 0,
+                layered: false,
+            };
+            let hwnd = create_canvas(&spec).expect("canvas created");
+            assert!(set_canvas_visible(hwnd, false));
+            assert!(set_canvas_visible(hwnd, true));
+            assert!(destroy_canvas(hwnd));
+        }
+
+        #[test]
+        fn smoke_brightness_and_clear() {
+            let spec = CanvasSpec {
+                x: 0,
+                y: 0,
+                w: 64,
+                h: 64,
+                parent: 0,
+                layered: false,
+            };
+            let hwnd = create_canvas(&spec).expect("canvas created");
+            for frame in 0..3u32 {
+                assert!(paint_test_pattern(hwnd, 64, 64, frame));
+            }
+            let bright = canvas_brightness(hwnd).expect("brightness of a painted canvas reads");
+            assert!(bright > 20.0, "pattern is bright, got {bright}");
+            assert!(clear_canvas(hwnd));
+            let dark = canvas_brightness(hwnd).expect("brightness reads after clear");
+            assert!(dark < 5.0, "cleared canvas is black, got {dark}");
             assert!(destroy_canvas(hwnd));
         }
     }

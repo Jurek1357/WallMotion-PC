@@ -9,7 +9,7 @@
 #![windows_subsystem = "windows"]
 
 use std::path::PathBuf;
-use wallmotion_player::{default_ipc_endpoint, ipc_set, IpcValue, SpawnOptions};
+use wallmotion_player::{ipc_set, unique_ipc_endpoint, IpcValue, SpawnOptions};
 
 mod autostart;
 mod cli;
@@ -51,6 +51,34 @@ fn chrono_stamp() -> String {
     }
 }
 
+/// Heartbeat (max one line per minute): proves the UI loop is alive,
+/// even with the window hidden to the tray. Diagnoses stalled rotation.
+fn heartbeat() {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::SeqCst)) >= 60 {
+        LAST.store(now, std::sync::atomic::Ordering::SeqCst);
+        debug_log("ui heartbeat (loop alive)");
+    }
+}
+
+/// mpv aliveness poll (max one line per 30 s): tells a live-but-black
+/// mpv apart from a dead one while the window is hidden.
+fn mpv_poll_log(alive: bool, file: &str) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::SeqCst)) >= 30 {
+        LAST.store(now, std::sync::atomic::Ordering::SeqCst);
+        debug_log(&format!("mpv poll alive={alive} file={file}"));
+    }
+}
+
 /// Show the main window: un-minimize, un-hide, repaint.
 fn show_window(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -62,9 +90,50 @@ fn show_window(ctx: &egui::Context) {
 
 /// Win32 handle of our window, for taskbar-free hiding (X hides the
 /// window from the taskbar while the tray icon keeps running).
-/// eframe has no taskbar toggle, so we hide at the Win32 level while
-/// winit still thinks the window is visible (event loop + tray alive).
+/// The window is NEVER really hidden (SW_HIDE stops the UI loop dead,
+/// which stalls rotation): it moves far off-screen and loses its
+/// taskbar button instead, so frames keep pumping while hidden.
 static APP_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Window rect saved before off-screen hiding (restored on show).
+static SAVED_RECT: std::sync::Mutex<(i32, i32, i32, i32)> =
+    std::sync::Mutex::new((100, 100, 940, 680));
+
+/// Message-only window owning our main window while hidden: owned
+/// windows never get a taskbar button (unlike TOOLWINDOW, which the
+/// shell sometimes keeps showing). Wallpaper-Engine style: window
+/// visible off-screen, button gone, tray icon stays.
+#[cfg(windows)]
+fn owner_window() -> isize {
+    static OWNER: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    let raw = OWNER.load(std::sync::atomic::Ordering::SeqCst);
+    if raw != 0 {
+        return raw;
+    }
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::*;
+        let h = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            windows::core::w!("STATIC"),
+            windows::core::w!(""),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            None,
+            None,
+        )
+        .map(|h| h.0 as isize)
+        .unwrap_or(0);
+        if h != 0 {
+            OWNER.store(h, std::sync::atomic::Ordering::SeqCst);
+        }
+        h
+    }
+}
 
 #[cfg(windows)]
 fn find_app_hwnd() -> isize {
@@ -82,16 +151,44 @@ fn find_app_hwnd() -> isize {
 }
 
 /// Hide the window incl. its taskbar button (tray icon stays).
+/// Off-screen + toolwindow style: winit still sees a visible window,
+/// so the event loop (rotation, tray) keeps running.
 #[cfg(windows)]
 fn hide_app_window() {
-    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::*;
     let raw = APP_HWND.load(std::sync::atomic::Ordering::SeqCst);
     if raw != 0 {
         unsafe {
-            let _ = ShowWindow(
-                windows::Win32::Foundation::HWND(raw as *mut std::ffi::c_void),
-                SW_HIDE,
+            let hwnd = HWND(raw as *mut std::ffi::c_void);
+            // Remember where to come back (never the off-screen spot).
+            let mut r = windows::Win32::Foundation::RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_ok() && r.left > -10000 {
+                if let Ok(mut saved) = SAVED_RECT.lock() {
+                    *saved = (r.left, r.top, r.right - r.left, r.bottom - r.top);
+                }
+            }
+            // Drop the taskbar button, keep the window "visible".
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            SetWindowLongW(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0) as i32);
+            let ex2 = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            // Owned windows never get a taskbar button (bulletproof).
+            let owner = owner_window();
+            if owner != 0 {
+                let _ = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner);
+            }
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                -32000,
+                -32000,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
+            debug_log(&format!(
+                "hide to tray (off-screen) ex={ex:08x}->{ex2:08x} owner={owner}"
+            ));
         }
     }
 }
@@ -99,16 +196,33 @@ fn hide_app_window() {
 /// Re-show a window hidden with [`hide_app_window`].
 #[cfg(windows)]
 fn reveal_app_window() {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
-    };
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::*;
     let raw = APP_HWND.load(std::sync::atomic::Ordering::SeqCst);
     if raw != 0 {
         unsafe {
-            let hwnd = windows::Win32::Foundation::HWND(raw as *mut std::ffi::c_void);
-            let _ = ShowWindow(hwnd, SW_SHOW);
+            let hwnd = HWND(raw as *mut std::ffi::c_void);
+            // Taskbar button back: clear owner first, then the style.
+            let _ = SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, 0);
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            SetWindowLongW(hwnd, GWL_EXSTYLE, (ex & !WS_EX_TOOLWINDOW.0) as i32);
+            // Back to the saved spot (or default size).
+            let (x, y, w, h) = SAVED_RECT
+                .lock()
+                .map(|r| *r)
+                .unwrap_or((100, 100, 940, 680));
             let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                x,
+                y,
+                w.max(200),
+                h.max(200),
+                SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
             let _ = SetForegroundWindow(hwnd);
+            debug_log("revealed from tray");
         }
     }
 }
@@ -157,6 +271,10 @@ struct RunningVideo {
     child: std::process::Child,
     ipc: String,
     canvas: isize,
+    /// Monitor geometry the canvas was built for (stale on monitor
+    /// change → next switch rebuilds the canvas).
+    #[cfg(windows)]
+    rect: (i32, i32, i32, i32),
 }
 
 struct App {
@@ -174,12 +292,16 @@ struct App {
     auto: wallmotion_core::autopause::AutoPause,
     auto_paused: bool,
     last_poll: std::time::Instant,
+    last_zcheck: std::time::Instant,
     remote_rx: Option<std::sync::mpsc::Receiver<String>>,
     pending_start: bool,
     rotation: wallmotion_core::rotation::RotationQueue,
     rotation_enabled: bool,
     rotation_interval: u64,
     last_rotation: std::time::Instant,
+    /// Consecutive rotation files whose mpv exited with an error (broken
+    /// files are skipped; a full cycle of them switches rotation off).
+    rot_quick_skips: u32,
     library: Vec<library::MediaItem>,
     thumbs: std::collections::HashMap<String, egui::TextureHandle>,
     lib_scanned: bool,
@@ -362,11 +484,13 @@ impl Default for App {
             pause_on_fullscreen: saved.pause_on_fullscreen,
             pause_on_battery: saved.pause_on_battery,
             last_poll: std::time::Instant::now(),
+            last_zcheck: std::time::Instant::now(),
             remote_rx: None,
             pending_start: false,
             rotation_enabled: saved.rotation.enabled,
             rotation_interval: interval,
             last_rotation: std::time::Instant::now(),
+            rot_quick_skips: 0,
             rotation,
             library: vec![],
             thumbs: Default::default(),
@@ -453,6 +577,8 @@ impl App {
             }
         }
         if cmd.get("stop").and_then(|v| v.as_bool()).unwrap_or(false) {
+            // Stopping halts the rotation too (no dead "enabled but idle").
+            self.rotation_enabled = false;
             self.stop_video();
         }
         if let Some(muted) = cmd.get("muted").and_then(|v| v.as_bool()) {
@@ -513,8 +639,10 @@ impl App {
     }
 
     /// Restore remembered volume for the current file, if any.
-    /// Mirrors Python `_apply_volume_memory`: the volume is always
-    /// recalled, but mute is never turned OFF by memory (it may turn ON).
+    /// Only the volume is per-file: mute stays exactly as the user set
+    /// it (global). Recalling a stored mute re-muted videos behind the
+    /// user's back on every switch, which is worse than no memory.
+    /// The muted flag is still recorded (Python shares the config).
     fn apply_volume_memory(&mut self) {
         let path = self.file.trim().to_string();
         if path.is_empty() {
@@ -522,18 +650,36 @@ impl App {
         }
         if let Some(entry) = wallmotion_core::volumememory::lookup(Some(&self.volumes), &path) {
             self.volume = entry.volume;
-            if entry.muted {
-                self.muted = true;
-            }
         }
     }
 
-    /// Play a rotation item now: set file, apply, restart the timer.
+    /// Play a rotation item now: set file, apply, note the start time
+    /// (image dwell + spawn-rate debounce measure from here).
     fn play_rotation_path(&mut self, path: String) {
         self.file = path;
         self.set_wallpaper();
         self.persist();
         self.last_rotation = std::time::Instant::now();
+    }
+
+    /// Move to the next rotation item. Same path back means the list
+    /// ended (non-repeating) or holds a single file: rotation switches
+    /// off and the file replays looped; `None` means every file vanished.
+    fn advance_rotation(&mut self) {
+        match self.rotation.next_file() {
+            Some(path) if path != self.file => {
+                debug_log(&format!("rotation advance -> {path}"));
+                self.play_rotation_path(path);
+            }
+            Some(same) => {
+                self.rotation_enabled = false;
+                self.play_rotation_path(same);
+            }
+            None => {
+                self.rotation_enabled = false;
+                self.persist();
+            }
+        }
     }
 
     /// (Re)detect the yt-dlp/ffmpeg sidecars. Cheap fs checks; called
@@ -838,26 +984,50 @@ impl App {
 
     /// One rotation tick. Timer-driven (videos loop, so unlike Python
     /// there is no follow-video-end mode).
+    /// Advance the rotation: videos switch when the file finishes
+    /// playing (rotation mode spawns mpv without `--loop`, so its exit
+    /// *is* the end-of-file signal); images dwell on the saved interval.
+    /// Broken files are skipped, a full cycle of them switches rotation
+    /// off. At most one advance per 500 ms (no spawn machine-gun).
     fn rotation_tick(&mut self) {
         if !self.rotation_enabled || self.rotation.is_empty() {
             return;
         }
-        if self.last_rotation.elapsed()
-            < std::time::Duration::from_secs(self.rotation_interval.max(1))
-        {
+        if is_image_path(&self.file) {
+            if self.last_rotation.elapsed()
+                < std::time::Duration::from_secs(self.rotation_interval.max(1))
+            {
+                return;
+            }
+            self.advance_rotation();
             return;
         }
-        self.last_rotation = std::time::Instant::now();
-        if let Some(path) = self.rotation.next_file() {
-            if !self.rotation.repeat() && path == self.file {
-                // End of a non-repeating list: keep the last wallpaper
-                // and switch rotation off (mirrors Python).
-                self.rotation_enabled = false;
-            } else {
-                self.file = path;
-                self.set_wallpaper();
-            }
+        // Video: exited mpv = end of file (success) or broken file.
+        // Still running (playing/paused) or never spawned: wait.
+        let exit_ok: Option<bool> =
+            self.running
+                .as_mut()
+                .and_then(|run| match run.child.try_wait() {
+                    Ok(Some(status)) => Some(status.success()),
+                    _ => None,
+                });
+        let ok = match exit_ok {
+            Some(ok) => ok,
+            None => return,
+        };
+        debug_log(&format!("rotation eof ok={ok} file={}", self.file));
+        if self.last_rotation.elapsed() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        if ok {
+            self.rot_quick_skips = 0;
+            self.advance_rotation();
+        } else if self.rot_quick_skips >= self.rotation.len().max(1) as u32 {
+            self.rotation_enabled = false;
             self.persist();
+        } else {
+            self.rot_quick_skips += 1;
+            self.advance_rotation();
         }
     }
 
@@ -899,7 +1069,7 @@ impl App {
     /// stacked layout.
     fn settings_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let dark = self.applied_style.unwrap_or(true);
-        card_frame(dark).show(ui, |ui| {
+        settings_card(ui, dark, |ui| {
             card_title(ui, i18n::tr(self.lang, "source_title"));
             ui.horizontal(|ui| {
                 if ui.button(i18n::tr(self.lang, "browse")).clicked() {
@@ -981,7 +1151,7 @@ impl App {
             }
         }); // source card
         ui.add_space(8.0);
-        card_frame(dark).show(ui, |ui| {
+        settings_card(ui, dark, |ui| {
             egui::CollapsingHeader::new(i18n::tr(self.lang, "sound_title"))
                 .default_open(true)
                 .show(ui, |ui| {
@@ -994,19 +1164,21 @@ impl App {
                             self.persist();
                         }
                         ui.label(i18n::tr(self.lang, "volume_label"));
-                        let w = (ui.available_width() - 52.0).max(80.0);
-                        if ui
-                            .add_sized(
-                                egui::vec2(w, 0.0),
-                                egui::Slider::new(&mut self.volume, 0..=100).show_value(false),
-                            )
-                            .changed()
-                        {
-                            self.apply_mute_volume();
-                            self.persist();
-                        }
-                        ui.label(format!("{}%", self.volume));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(format!("{}%", self.volume));
+                        });
                     });
+                    let w = ui.available_width().max(80.0);
+                    if ui
+                        .add_sized(
+                            egui::vec2(w, 0.0),
+                            egui::Slider::new(&mut self.volume, 0..=100).show_value(false),
+                        )
+                        .changed()
+                    {
+                        self.apply_mute_volume();
+                        self.persist();
+                    }
                     ui.horizontal_wrapped(|ui| {
                         if ui
                             .checkbox(
@@ -1034,7 +1206,7 @@ impl App {
                 });
         }); // sound card
         ui.add_space(8.0);
-        card_frame(dark).show(ui, |ui| {
+        settings_card(ui, dark, |ui| {
             egui::CollapsingHeader::new(i18n::tr(self.lang, "rotation_title"))
                 .default_open(true)
                 .show(ui, |ui| {
@@ -1047,28 +1219,14 @@ impl App {
                             .changed()
                         {
                             self.last_rotation = std::time::Instant::now();
+                            // The mpv loop flag is chosen at spawn: re-spawn
+                            // a running video so the new mode applies
+                            // (looped single vs. advancing playlist).
+                            if self.running.is_some() && !is_image_path(&self.file) {
+                                self.set_wallpaper();
+                            }
                             self.persist();
                         }
-                        ui.label(i18n::tr(self.lang, "rotation_interval"));
-                        egui::ComboBox::from_id_salt("rot_interval")
-                            .selected_text(wallmotion_core::rotation::format_interval(
-                                self.rotation_interval,
-                            ))
-                            .show_ui(ui, |ui| {
-                                for &secs in wallmotion_core::rotation::INTERVALS {
-                                    if ui
-                                        .selectable_value(
-                                            &mut self.rotation_interval,
-                                            secs,
-                                            wallmotion_core::rotation::format_interval(secs),
-                                        )
-                                        .changed()
-                                    {
-                                        self.last_rotation = std::time::Instant::now();
-                                        self.persist();
-                                    }
-                                }
-                            });
                         let mut shuffle = self.rotation.shuffle();
                         if ui
                             .checkbox(&mut shuffle, i18n::tr(self.lang, "rotation_shuffle"))
@@ -1101,6 +1259,8 @@ impl App {
                                 self.persist();
                             }
                         }
+                    });
+                    ui.horizontal_wrapped(|ui| {
                         ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
                             if ui.button(i18n::tr(self.lang, "rotation_skip")).clicked() {
                                 if let Some(path) = self.rotation.next_file() {
@@ -1113,22 +1273,32 @@ impl App {
                             self.rotation_enabled = false;
                             self.persist();
                         }
-                        ui.label(i18n::trf(
+                    });
+                    ui.label(
+                        egui::RichText::new(i18n::trf(
                             self.lang,
                             "rotation_count",
                             &[("n", &self.rotation.len().to_string())],
-                        ));
-                    });
+                        ))
+                        .strong(),
+                    );
                 });
         }); // rotation card
         ui.add_space(8.0);
-        card_frame(dark).show(ui, |ui| {
+        self.youtube_card(ui, ctx);
+    }
+
+    /// YouTube download card (under the preview in wide mode, last in
+    /// narrow mode) — balances the columns.
+    fn youtube_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let dark = self.applied_style.unwrap_or(true);
+        settings_card(ui, dark, |ui| {
             egui::CollapsingHeader::new(i18n::tr(self.lang, "yt_title"))
                 .default_open(true)
                 .show(ui, |ui| {
                     self.youtube_section(ui, ctx);
                 });
-        }); // youtube card
+        });
     }
 
     /// Preview card: live thumbnail of the current wallpaper, file name +
@@ -1180,16 +1350,7 @@ impl App {
         });
         ui.add_space(4.0);
         let dark = self.applied_style.unwrap_or(true);
-        if ui
-            .add_sized(
-                egui::vec2(ui.available_width().max(60.0), 0.0),
-                egui::Button::new(
-                    egui::RichText::new(i18n::tr(self.lang, "apply")).color(egui::Color32::WHITE),
-                )
-                .fill(accent_color(dark)),
-            )
-            .clicked()
-        {
+        if big_accent_button(ui, dark, i18n::tr(self.lang, "apply")).clicked() {
             self.set_wallpaper();
         }
         ui.horizontal_wrapped(|ui| {
@@ -1204,7 +1365,10 @@ impl App {
                 }
             });
             if ui.button(i18n::tr(self.lang, "stop")).clicked() {
+                // Stopping halts the rotation too (no dead "enabled but idle").
+                self.rotation_enabled = false;
                 self.stop_video();
+                self.persist();
             }
         });
     }
@@ -1224,8 +1388,10 @@ impl App {
         if self.yt_busy {
             if ui
                 .add_sized(
-                    egui::vec2(ui.available_width().max(60.0), 0.0),
-                    egui::Button::new(i18n::tr(self.lang, "dl_cancel")),
+                    egui::vec2(ui.available_width().max(60.0), 32.0),
+                    egui::Button::new(
+                        egui::RichText::new(i18n::tr(self.lang, "dl_cancel")).size(15.0),
+                    ),
                 )
                 .clicked()
             {
@@ -1237,14 +1403,7 @@ impl App {
                 self.yt_status = i18n::tr(self.lang, "yt_cancelled");
             }
         } else {
-            let dl = ui.add_sized(
-                egui::vec2(ui.available_width().max(60.0), 0.0),
-                egui::Button::new(
-                    egui::RichText::new(i18n::tr(self.lang, "dl_download"))
-                        .color(egui::Color32::WHITE),
-                )
-                .fill(accent_color(dark)),
-            );
+            let dl = big_accent_button(ui, dark, i18n::tr(self.lang, "dl_download"));
             if dl.clicked() || url_entered {
                 self.start_yt_url(ctx);
             }
@@ -1264,14 +1423,10 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             match (&self.ytdlp_path, &self.ytdlp_ver) {
                 (Some(_), Some(v)) => {
-                    ui.label(egui::RichText::new(format!("yt-dlp {v}")).small().weak());
+                    ui.label(egui::RichText::new(format!("yt-dlp {v}")).weak());
                 }
                 (Some(_), None) => {
-                    ui.label(
-                        egui::RichText::new(i18n::tr(self.lang, "tool_ytdlp_found"))
-                            .small()
-                            .weak(),
-                    );
+                    ui.label(egui::RichText::new(i18n::tr(self.lang, "tool_ytdlp_found")).weak());
                 }
                 (None, _) => {
                     if self.tool_busy {
@@ -1299,11 +1454,7 @@ impl App {
                 }
             }
             if self.ffmpeg_path.is_some() {
-                ui.label(
-                    egui::RichText::new(i18n::tr(self.lang, "tool_ffmpeg_ok"))
-                        .small()
-                        .weak(),
-                );
+                ui.label(egui::RichText::new(i18n::tr(self.lang, "tool_ffmpeg_ok")).weak());
             } else {
                 if self.tool_busy {
                     ui.spinner();
@@ -1395,19 +1546,15 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| dir.to_string_lossy().into_owned());
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · {}",
-                    i18n::trf(
-                        self.lang,
-                        "library_count",
-                        &[("n", &self.library.len().to_string())]
-                    ),
-                    truncate_middle(&folder, 40)
-                ))
-                .small()
-                .weak(),
-            )
+            ui.label(egui::RichText::new(format!(
+                "{} · {}",
+                i18n::trf(
+                    self.lang,
+                    "library_count",
+                    &[("n", &self.library.len().to_string())]
+                ),
+                truncate_middle(&folder, 40)
+            )))
             .on_hover_text(dir.to_string_lossy().into_owned());
         }
         let query = self.lib_search.trim().to_lowercase();
@@ -1455,26 +1602,42 @@ impl App {
                             .corner_radius(egui::CornerRadius::same(8))
                             .inner_margin(6.0)
                             .show(ui, |ui| {
+                                // Fixed thumbnail box: every card ends up the
+                                // same height regardless of source aspect.
+                                const THUMB_H: f32 = 84.0;
                                 let w = (card_w - 20.0).max(60.0);
+                                let thumb_layout =
+                                    egui::Layout::centered_and_justified(egui::Direction::TopDown);
                                 if let Some(tex) = self.thumbs.get(&item.name) {
+                                    // Fit inside the box, keep aspect.
                                     let size = tex.size_vec2();
-                                    let h = (w * size.y / size.x.max(1.0)).clamp(40.0, 84.0);
-                                    ui.centered_and_justified(|ui| {
-                                        ui.image((tex.id(), egui::vec2(w, h)));
-                                    });
+                                    let scale =
+                                        (w / size.x.max(1.0)).min(THUMB_H / size.y.max(1.0));
+                                    let iw = (size.x * scale).max(1.0);
+                                    let ih = (size.y * scale).max(1.0);
+                                    let id = tex.id();
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(w, THUMB_H),
+                                        thumb_layout,
+                                        |ui| {
+                                            ui.image((id, egui::vec2(iw, ih)));
+                                        },
+                                    );
                                 } else {
-                                    ui.vertical_centered(|ui| {
-                                        ui.add_space(26.0);
-                                        ui.label(
-                                            egui::RichText::new(match item.kind {
-                                                library::MediaKind::Image => "[img]",
-                                                library::MediaKind::Video => "[vid]",
-                                            })
-                                            .weak()
-                                            .small(),
-                                        );
-                                        ui.add_space(26.0);
-                                    });
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(w, THUMB_H),
+                                        thumb_layout,
+                                        |ui| {
+                                            ui.label(
+                                                egui::RichText::new(match item.kind {
+                                                    library::MediaKind::Image => "[img]",
+                                                    library::MediaKind::Video => "[vid]",
+                                                })
+                                                .weak()
+                                                .small(),
+                                            );
+                                        },
+                                    );
                                 }
                                 let fav = if self.favorites.contains(&item.name) {
                                     "★ "
@@ -1542,20 +1705,10 @@ impl App {
                             item.kind.label(),
                             library::format_size(item.size)
                         ))
-                        .small()
                         .weak(),
                     );
                     c.add_space(4.0);
-                    if c.add_sized(
-                        egui::vec2(c.available_width().max(60.0), 0.0),
-                        egui::Button::new(
-                            egui::RichText::new(i18n::tr(self.lang, "library_set"))
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(accent_color(dark)),
-                    )
-                    .clicked()
-                    {
+                    if big_accent_button(c, dark, i18n::tr(self.lang, "library_set")).clicked() {
                         action = Some(LibAction::Set(item.name.clone()));
                     }
                     c.horizontal_wrapped(|c| {
@@ -1719,24 +1872,29 @@ impl App {
     }
 
     fn set_wallpaper(&mut self) {
-        self.stop_video();
         let path = PathBuf::from(self.file.trim());
         if !path.is_file() {
+            self.stop_video();
             self.status = i18n::tr(self.lang, "warn_nofile_m");
             return;
         }
         // Per-file volume memory (mirrors Python `_apply_volume_memory`).
         self.apply_volume_memory();
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        const IMAGES: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "gif"];
-        if IMAGES.contains(&ext.as_str()) {
+        if is_image_path(&self.file) {
+            // Static wallpaper first (it lands behind the video canvas),
+            // then teardown: no flash of the original background.
             self.set_image(&path);
+            let img_status = self.status.clone();
+            self.stop_video();
+            self.status = img_status;
             return;
         }
-        self.set_video(path);
+        if self.running.is_some() {
+            self.switch_video(path);
+        } else {
+            self.stop_video();
+            self.set_video(path);
+        }
     }
 
     #[cfg(windows)]
@@ -1775,17 +1933,135 @@ impl App {
         self.status = i18n::tr(self.lang, "no_canvas");
     }
 
-    fn set_video(&mut self, path: PathBuf) {
-        use wallmotion_win::canvas::sys as canvas;
+    /// "Playing behind icons (WxH at X,Y on M)" status line.
+    #[cfg(windows)]
+    fn video_status(&self) -> String {
+        let where_tag = if self.monitor.is_empty() {
+            i18n::tr(self.lang, "monitor_all")
+        } else {
+            self.monitor.clone()
+        };
+        let (x, y, w, h) = self.selected_rect();
+        i18n::trf(
+            self.lang,
+            "status_video_where",
+            &[
+                ("w", &w.to_string()),
+                ("h", &h.to_string()),
+                ("x", &x.to_string()),
+                ("y", &y.to_string()),
+                ("m", &where_tag),
+            ],
+        )
+    }
+
+    /// Spawn mpv for `path` on the given canvas without touching the
+    /// current playback. The caller adopts the runner, or destroys a
+    /// freshly built canvas on failure. Err = localized status text.
+    fn launch_video(
+        &mut self,
+        canvas: isize,
+        rect: (i32, i32, i32, i32),
+        path: &std::path::Path,
+        muted: bool,
+    ) -> Result<RunningVideo, String> {
         let mpv = match Self::mpv_bin() {
             Some(p) => p,
-            None => {
-                self.status = i18n::tr(self.lang, "mpv_missing");
-                return;
-            }
+            None => return Err(i18n::tr(self.lang, "mpv_missing")),
         };
         #[cfg(windows)]
         {
+            let opts = SpawnOptions {
+                mpv,
+                wid: canvas,
+                file: path.to_path_buf(),
+                muted,
+                volume: self.volume as f32 / 100.0,
+                // Rotation mode plays without loop: the exiting mpv is
+                // the end-of-file signal that advances the playlist.
+                loop_file: !(self.rotation_enabled && !self.rotation.is_empty()),
+                ipc_endpoint: unique_ipc_endpoint(),
+            };
+            match wallmotion_player::spawn_mpv(&opts) {
+                Ok(child) => Ok(RunningVideo {
+                    child,
+                    ipc: opts.ipc_endpoint,
+                    canvas,
+                    rect,
+                }),
+                Err(e) => Err(i18n::trf(self.lang, "mpv_failed", &[("e", &e.to_string())])),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (mpv, canvas, rect, path);
+            Err(i18n::tr(self.lang, "no_canvas"))
+        }
+    }
+    /// The runner's canvas still matches the current monitor layout
+    /// (always false off Windows, where video never runs).
+    fn canvas_current(&self, run: &RunningVideo) -> bool {
+        #[cfg(windows)]
+        {
+            self.selected_rect() == run.rect
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = run;
+            false
+        }
+    }
+
+    /// Seamless-ish switch on the SAME canvas: no new window, no
+    /// teardown flash. The predecessor is reaped FIRST (mpv never paints
+    /// into a covered canvas, and two renderers on one HWND freeze);
+    /// its frozen last frame bridges the new mpv's startup. A stale
+    /// layout falls back to a full rebuild.
+    fn switch_video(&mut self, path: PathBuf) {
+        let Some(mut old) = self.running.take() else {
+            self.set_video(path);
+            return;
+        };
+        if !self.canvas_current(&old) {
+            let mut old = old;
+            let _ = old.child.kill();
+            let _ = old.child.wait();
+            #[cfg(windows)]
+            wallmotion_win::canvas::sys::destroy_canvas(old.canvas);
+            #[cfg(not(windows))]
+            let _ = old.canvas;
+            self.set_video(path);
+            return;
+        }
+        let _ = old.child.kill();
+        let _ = old.child.wait();
+        let canvas = old.canvas;
+        #[cfg(windows)]
+        let rect = old.rect;
+        #[cfg(not(windows))]
+        let rect = (0, 0, 1, 1);
+        debug_log(&format!("switch {}", path.display()));
+        match self.launch_video(canvas, rect, &path, self.muted) {
+            Ok(run) => {
+                self.running = Some(run);
+                self.paused = false;
+                self.auto_paused = false;
+                self.auto.reset();
+                #[cfg(windows)]
+                {
+                    self.status = self.video_status();
+                }
+            }
+            Err(msg) => {
+                self.status = msg;
+            }
+        }
+    }
+
+    fn set_video(&mut self, path: PathBuf) {
+        #[cfg(windows)]
+        {
+            use wallmotion_win::canvas::sys as canvas;
             let (x, y, w, h) = self.selected_rect();
             let wc = match canvas::setup_wallpaper_canvas(x, y, w, h) {
                 Some(wc) => wc,
@@ -1794,47 +2070,20 @@ impl App {
                     return;
                 }
             };
-            let opts = SpawnOptions {
-                mpv,
-                wid: wc.canvas,
-                file: path,
-                muted: self.muted,
-                volume: self.volume as f32 / 100.0,
-                ipc_endpoint: default_ipc_endpoint(),
-            };
-            match wallmotion_player::spawn_mpv(&opts) {
-                Ok(child) => {
-                    let where_tag = if self.monitor.is_empty() {
-                        i18n::tr(self.lang, "monitor_all")
-                    } else {
-                        self.monitor.clone()
-                    };
-                    self.status = i18n::trf(
-                        self.lang,
-                        "status_video_where",
-                        &[
-                            ("w", &w.to_string()),
-                            ("h", &h.to_string()),
-                            ("x", &x.to_string()),
-                            ("y", &y.to_string()),
-                            ("m", &where_tag),
-                        ],
-                    );
-                    self.running = Some(RunningVideo {
-                        child,
-                        ipc: opts.ipc_endpoint,
-                        canvas: wc.canvas,
-                    });
+            match self.launch_video(wc.canvas, (x, y, w, h), &path, self.muted) {
+                Ok(run) => {
+                    self.status = self.video_status();
+                    self.running = Some(run);
                 }
-                Err(e) => {
+                Err(msg) => {
                     canvas::destroy_canvas(wc.canvas);
-                    self.status = i18n::trf(self.lang, "mpv_failed", &[("e", &e.to_string())]);
+                    self.status = msg;
                 }
             }
         }
         #[cfg(not(windows))]
         {
-            let _ = mpv;
+            let _ = path;
             self.status = i18n::tr(self.lang, "no_canvas");
         }
     }
@@ -1851,6 +2100,7 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        heartbeat();
         // Tray menu actions (backup path; the tray thread usually wins).
         while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
             debug_log(&format!("menu event on ui thread: {}", event.id.0.as_str()));
@@ -2008,15 +2258,6 @@ impl eframe::App for App {
                     }
                     ui.vertical(|ui| {
                         ui.heading("WallMotion");
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} · {}",
-                                i18n::tr(self.lang, "subtitle"),
-                                wallmotion_win::backend_name()
-                            ))
-                            .small()
-                            .weak(),
-                        );
                     });
                 });
                 ui.add_space(6.0);
@@ -2070,8 +2311,29 @@ impl eframe::App for App {
                 ui.label(egui::RichText::new(&self.status).small().weak());
             }); // ScrollArea
         });
-        // Rotation tick (timer-driven; videos loop, no follow-video mode).
+        // Rotation tick (video-end driven; images dwell on interval).
         self.rotation_tick();
+        // Z-order watchdog: opaque WorkerW backgrounds drift above our
+        // canvas (video vanishes, audio plays on). Re-pin below icons,
+        // logging only real reorderings (plus mpv aliveness for diagnosis).
+        if self.running.is_some() && self.last_zcheck.elapsed() >= std::time::Duration::from_secs(2)
+        {
+            self.last_zcheck = std::time::Instant::now();
+            #[cfg(windows)]
+            if let Some(run) = &self.running {
+                use wallmotion_win::canvas::sys as canvas;
+                if !canvas::canvas_below_defview(run.canvas) {
+                    debug_log(&format!("zfix tree: {}", canvas::debug_desktop_tree()));
+                    canvas::ensure_below_defview(run.canvas);
+                }
+            }
+            mpv_poll_log(
+                self.running
+                    .as_mut()
+                    .is_some_and(|run| matches!(run.child.try_wait(), Ok(None))),
+                &self.file,
+            );
+        }
         // Autopause poll (Python POLL_INTERVAL_MS): pause at once, resume
         // after 2 clean polls. Throttled — update() runs every ~50ms.
         if self.last_poll.elapsed()
@@ -2163,6 +2425,10 @@ fn apply_style(ctx: &egui::Context, dark: bool) {
     visuals.window_corner_radius = egui::CornerRadius::same(10);
     visuals.menu_corner_radius = egui::CornerRadius::same(8);
     ctx.set_visuals(visuals);
+    // Roomier buttons app-wide (tabs, rows, dialogs).
+    ctx.style_mut(|s| {
+        s.spacing.button_padding = egui::vec2(10.0, 6.0);
+    });
 }
 
 /// Primary call-to-action button: accent fill, white text.
@@ -2170,6 +2436,20 @@ fn accent_button(ui: &mut egui::Ui, dark: bool, text: String) -> egui::Response 
     ui.add(
         egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE))
             .fill(accent_color(dark)),
+    )
+}
+
+/// Big primary call-to-action: full width, taller, larger text.
+/// Used for Set wallpaper / Download so the main actions stand out.
+fn big_accent_button(ui: &mut egui::Ui, dark: bool, text: String) -> egui::Response {
+    ui.add_sized(
+        egui::vec2(ui.available_width().max(60.0), 32.0),
+        egui::Button::new(
+            egui::RichText::new(text)
+                .size(15.0)
+                .color(egui::Color32::WHITE),
+        )
+        .fill(accent_color(dark)),
     )
 }
 
@@ -2194,6 +2474,17 @@ fn card_title(ui: &mut egui::Ui, text: String) {
     ui.add_space(4.0);
 }
 
+/// Settings card that always stretches to the full available width, so
+/// sibling cards align their right edges even when their content is
+/// short (the rotation card used to end up narrower).
+fn settings_card(ui: &mut egui::Ui, dark: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let full = ui.available_width().max(0.0);
+    card_frame(dark).show(ui, |ui| {
+        ui.set_width((full - 24.0).max(0.0));
+        add_contents(ui);
+    });
+}
+
 /// Short display name for a file path (file name only). The full path
 /// goes to the tooltip, so `\\?\C:\...` monsters never stretch/break
 /// the layout (the #1 "meh" offender in the old UI).
@@ -2207,6 +2498,18 @@ fn display_file_name(path: &str) -> String {
         .map(|n| n.to_string_lossy().into_owned())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| t.to_string())
+}
+
+/// Image extensions handled by the static-wallpaper path (shared by
+/// `set_wallpaper` and the rotation dwell check so both agree on what
+/// "ends" and what just sits).
+fn is_image_path(path: &str) -> bool {
+    const IMAGES: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "gif"];
+    PathBuf::from(path.trim())
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .map(|ext| IMAGES.contains(&ext.as_str()))
+        .unwrap_or(false)
 }
 
 /// Middle-truncate a long label to ~`max` chars (`very-lo…-name.mp4`).
@@ -2311,15 +2614,26 @@ fn main() {
         }
         return;
     }
-    let remote_rx = remote::start_server();
+    // Second gate: the command port is bound exclusively, so even a
+    // deleted/stale lock file can never fork a duplicate instance (each
+    // one would spawn its own canvas + mpv and fight over the desktop).
+    let remote_rx = match remote::start_server() {
+        Some(rx) => rx,
+        None => {
+            eprintln!("Another WallMotion instance is already running.");
+            return;
+        }
+    };
     let _tray = build_tray();
     debug_log(&format!(
-        "main start action={action} server={} tray={}",
-        remote_rx.is_some(),
+        "main start action={action} server=true tray={}",
         if _tray.is_some() { "ok" } else { "FAILED" }
     ));
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([480.0, 660.0])
+        // Wide enough for the two-column layout (controls | preview)
+        // right away; narrow windows stack the cards below each other.
+        .with_inner_size([940.0, 680.0])
+        .with_min_inner_size([420.0, 480.0])
         .with_title("WallMotion (native)");
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);
@@ -2333,8 +2647,17 @@ fn main() {
         options,
         Box::new(|cc| {
             tray_menu_thread(cc.egui_ctx.clone());
+            // Wake the UI loop twice a second from outside: when the
+            // window hides to the tray, frames may stop coming on their
+            // own and rotation/EOF polling would stall with them.
+            // Harmless while visible (just an extra repaint request).
+            let wake = cc.egui_ctx.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                wake.request_repaint();
+            });
             let mut app = App {
-                remote_rx,
+                remote_rx: Some(remote_rx),
                 start_hidden: args.minimized && !action,
                 ..Default::default()
             };

@@ -116,17 +116,31 @@ pub struct SpawnOptions {
     pub file: PathBuf,
     pub muted: bool,
     pub volume: f32,
+    /// Loop the file (`--loop-file=inf`) or stop at the end (`no`).
+    /// Rotation mode wants `false`: the exiting mpv *is* the end-of-file
+    /// signal that advances the playlist.
+    pub loop_file: bool,
     /// Full IPC endpoint (`\\.\pipe\…` on Windows, socket path elsewhere).
     pub ipc_endpoint: String,
 }
 
 /// Build the mpv command line. Pure, unit-tested.
+///
+/// `--no-config` + `--load-scripts=no` keep startup fast (no user
+/// config/script/font probing): every rotation switch spawns a fresh
+/// mpv, so startup milliseconds are visible as black frames.
 pub fn mpv_args(opts: &SpawnOptions) -> Vec<String> {
     let mut args = vec![
         format!("--wid={}", opts.wid),
+        "--no-config".to_string(),
+        "--load-scripts=no".to_string(),
         "--no-osc".to_string(),
         "--no-input-default-bindings".to_string(),
-        "--loop-file=inf".to_string(),
+        if opts.loop_file {
+            "--loop-file=inf".to_string()
+        } else {
+            "--loop-file=no".to_string()
+        },
         format!("--input-ipc-server={}", opts.ipc_endpoint),
     ];
     if opts.muted {
@@ -166,6 +180,16 @@ pub fn default_ipc_endpoint() -> String {
             .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
         format!("{base}/{MPV_IPC_NAME}.sock")
     }
+}
+
+/// Unique IPC endpoint per mpv instance (pid + counter). Overlapping
+/// runners (seamless handoffs) must NOT share one pipe: pause/volume
+/// commands would otherwise land on a random instance.
+pub fn unique_ipc_endpoint() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let base = default_ipc_endpoint();
+    format!("{base}-{}-{n}", std::process::id())
 }
 
 /// Send one IPC command. Never panics; false when mpv is unreachable.
@@ -245,6 +269,7 @@ mod tests {
             file: PathBuf::from("/tmp/v.mp4"),
             muted: false,
             volume: 0.6,
+            loop_file: true,
             ipc_endpoint: default_ipc_endpoint(),
         }
     }
@@ -278,10 +303,27 @@ mod tests {
         o.muted = true;
         let args = mpv_args(&o);
         assert!(args.contains(&"--mute=yes".to_string()));
+        assert!(args.contains(&"--loop-file=inf".to_string()));
         assert!(args.iter().any(|a| a.starts_with("--wid=")));
         assert!(args.iter().any(|a| a.starts_with("--input-ipc-server=")));
-        assert!(args.iter().any(|a| a.starts_with("--loop-file=")));
         assert_eq!(args.last().unwrap(), "/tmp/v.mp4");
+    }
+
+    #[test]
+    fn args_no_loop_for_rotation() {
+        let mut o = opts();
+        o.loop_file = false;
+        let args = mpv_args(&o);
+        assert!(args.contains(&"--loop-file=no".to_string()));
+        assert!(!args.iter().any(|a| a == "--loop-file=inf"));
+    }
+
+    #[test]
+    fn args_fast_startup() {
+        // Every switch spawns mpv: no user config/scripts probing.
+        let args = mpv_args(&opts());
+        assert!(args.contains(&"--no-config".to_string()));
+        assert!(args.contains(&"--load-scripts=no".to_string()));
     }
 
     #[test]
@@ -328,6 +370,14 @@ mod tests {
         assert!(ep.ends_with(".sock"));
     }
 
+    #[test]
+    fn unique_endpoints_differ() {
+        let a = unique_ipc_endpoint();
+        let b = unique_ipc_endpoint();
+        assert_ne!(a, b);
+        assert!(a.contains(&default_ipc_endpoint()));
+    }
+
     /// Live test, runs only with WALLMOTION_TEST_MPV + WALLMOTION_TEST_VIDEO
     /// set (local runs with a display, never CI): plain canvas on WorkerW
     /// (legacy path, no manifest needed), mpv inside it, pause/volume
@@ -365,6 +415,7 @@ mod tests {
             file: video,
             muted: true,
             volume: 0.3,
+            loop_file: true,
             ipc_endpoint: default_ipc_endpoint(),
         };
         let mut child = spawn_mpv(&opts).expect("mpv spawned");

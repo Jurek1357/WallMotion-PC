@@ -275,7 +275,13 @@ struct RunningVideo {
     /// change → next switch rebuilds the canvas).
     #[cfg(windows)]
     rect: (i32, i32, i32, i32),
+    /// Only the first runner plays audio; the rest stay muted (one
+    /// video on every monitor must not echo).
+    audible: bool,
 }
+
+/// Mean canvas luma above which a monitor counts as "painting video".
+const SYNC_BRIGHTNESS: f64 = 10.0;
 
 struct App {
     file: String,
@@ -283,6 +289,9 @@ struct App {
     muted: bool,
     volume: u8,
     running: Option<RunningVideo>,
+    /// Extra runners for the other monitors (same video everywhere,
+    /// muted except the first). Empty unless multi-monitor is active.
+    extra: Vec<RunningVideo>,
     quit_requested: bool,
     paused: bool,
     monitor: String,
@@ -472,6 +481,7 @@ impl Default for App {
             muted: saved.muted,
             volume: saved.volume,
             running: None,
+            extra: vec![],
             quit_requested: false,
             paused: false,
             monitor: saved.monitor,
@@ -1002,15 +1012,24 @@ impl App {
             self.advance_rotation();
             return;
         }
-        // Video: exited mpv = end of file (success) or broken file.
-        // Still running (playing/paused) or never spawned: wait.
-        let exit_ok: Option<bool> =
-            self.running
-                .as_mut()
-                .and_then(|run| match run.child.try_wait() {
-                    Ok(Some(status)) => Some(status.success()),
-                    _ => None,
-                });
+        // Video: an exited mpv on ANY monitor = end of file (success)
+        // or broken file. Still running (playing/paused) or never
+        // spawned: wait.
+        let exit_ok: Option<bool> = self
+            .running
+            .as_mut()
+            .and_then(|run| match run.child.try_wait() {
+                Ok(Some(status)) => Some(status.success()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.extra
+                    .iter_mut()
+                    .find_map(|run| match run.child.try_wait() {
+                        Ok(Some(status)) => Some(status.success()),
+                        _ => None,
+                    })
+            });
         let ok = match exit_ok {
             Some(ok) => ok,
             None => return,
@@ -1222,7 +1241,7 @@ impl App {
                             // The mpv loop flag is chosen at spawn: re-spawn
                             // a running video so the new mode applies
                             // (looped single vs. advancing playlist).
-                            if self.running.is_some() && !is_image_path(&self.file) {
+                            if self.any_running() && !is_image_path(&self.file) {
                                 self.set_wallpaper();
                             }
                             self.persist();
@@ -1336,7 +1355,7 @@ impl App {
                     .on_hover_text(self.file.clone());
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let state = if self.running.is_some() {
+                let state = if self.any_running() {
                     if self.paused {
                         i18n::tr(self.lang, "status_paused")
                     } else {
@@ -1359,7 +1378,7 @@ impl App {
             } else {
                 i18n::tr(self.lang, "video_pause")
             };
-            ui.add_enabled_ui(self.running.is_some(), |ui| {
+            ui.add_enabled_ui(self.any_running(), |ui| {
                 if ui.button(pause_label).clicked() {
                     self.toggle_pause();
                 }
@@ -1815,13 +1834,11 @@ impl App {
     }
 
     fn stop_video(&mut self) {
-        if let Some(mut run) = self.running.take() {
-            let _ = run.child.kill();
-            let _ = run.child.wait();
-            #[cfg(windows)]
-            wallmotion_win::canvas::sys::destroy_canvas(run.canvas);
-            #[cfg(not(windows))]
-            let _ = run.canvas;
+        if let Some(run) = self.running.take() {
+            reap_runner(run);
+        }
+        for run in self.extra.drain(..) {
+            reap_runner(run);
         }
         self.paused = false;
         self.auto_paused = false;
@@ -1830,24 +1847,30 @@ impl App {
     }
 
     fn toggle_pause(&mut self) {
-        if let Some(run) = &self.running {
-            self.paused = !self.paused;
-            let effective = self.paused || self.auto_paused;
-            ipc_set(&run.ipc, "pause", &IpcValue::Bool(effective));
-            self.status = if self.paused {
-                i18n::tr(self.lang, "status_paused")
-            } else if self.auto_paused {
-                i18n::tr(self.lang, "status_autopaused")
-            } else {
-                i18n::tr(self.lang, "status_playing")
-            };
+        if !self.any_running() {
+            return;
         }
+        self.paused = !self.paused;
+        let effective = self.paused || self.auto_paused;
+        if let Some(run) = &self.running {
+            ipc_set(&run.ipc, "pause", &IpcValue::Bool(effective));
+        }
+        for run in &self.extra {
+            ipc_set(&run.ipc, "pause", &IpcValue::Bool(effective));
+        }
+        self.status = if self.paused {
+            i18n::tr(self.lang, "status_paused")
+        } else if self.auto_paused {
+            i18n::tr(self.lang, "status_autopaused")
+        } else {
+            i18n::tr(self.lang, "status_playing")
+        };
     }
 
     /// One autopause poll (throttled by the caller). Never overrides the
     /// manual Pause button; pauses at once, resumes after 2 clean polls.
     fn autopause_tick(&mut self) {
-        if self.running.is_none() || self.paused {
+        if !self.any_running() || self.paused {
             return;
         }
         let fullscreen = poll_fullscreen();
@@ -1858,11 +1881,17 @@ impl App {
                 if let Some(run) = &self.running {
                     ipc_set(&run.ipc, "pause", &IpcValue::Bool(true));
                 }
+                for run in &self.extra {
+                    ipc_set(&run.ipc, "pause", &IpcValue::Bool(true));
+                }
                 self.status = i18n::tr(self.lang, "status_autopaused");
             }
             Some(false) => {
                 self.auto_paused = false;
                 if let Some(run) = &self.running {
+                    ipc_set(&run.ipc, "pause", &IpcValue::Bool(false));
+                }
+                for run in &self.extra {
                     ipc_set(&run.ipc, "pause", &IpcValue::Bool(false));
                 }
                 self.status = i18n::tr(self.lang, "status_playing");
@@ -1889,7 +1918,7 @@ impl App {
             self.status = img_status;
             return;
         }
-        if self.running.is_some() {
+        if self.any_running() {
             self.switch_video(path);
         } else {
             self.stop_video();
@@ -1964,6 +1993,7 @@ impl App {
         rect: (i32, i32, i32, i32),
         path: &std::path::Path,
         muted: bool,
+        audible: bool,
     ) -> Result<RunningVideo, String> {
         let mpv = match Self::mpv_bin() {
             Some(p) => p,
@@ -1988,97 +2018,201 @@ impl App {
                     ipc: opts.ipc_endpoint,
                     canvas,
                     rect,
+                    audible,
                 }),
                 Err(e) => Err(i18n::trf(self.lang, "mpv_failed", &[("e", &e.to_string())])),
             }
         }
         #[cfg(not(windows))]
         {
-            let _ = (mpv, canvas, rect, path);
+            let _ = (mpv, canvas, rect, path, muted, audible);
             Err(i18n::tr(self.lang, "no_canvas"))
         }
     }
-    /// The runner's canvas still matches the current monitor layout
-    /// (always false off Windows, where video never runs).
-    fn canvas_current(&self, run: &RunningVideo) -> bool {
-        #[cfg(windows)]
-        {
-            self.selected_rect() == run.rect
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = run;
-            false
-        }
+    /// Any video playing (primary or extra monitor runner).
+    fn any_running(&self) -> bool {
+        self.running.is_some() || !self.extra.is_empty()
     }
 
-    /// Seamless-ish switch on the SAME canvas: no new window, no
-    /// teardown flash. The predecessor is reaped FIRST (mpv never paints
-    /// into a covered canvas, and two renderers on one HWND freeze);
-    /// its frozen last frame bridges the new mpv's startup. A stale
-    /// layout falls back to a full rebuild.
+    /// Target canvas rects: one per selected monitor (same video on
+    /// each), or the whole virtual screen when the monitor list is
+    /// unavailable. `monitor` empty = all monitors.
+    #[cfg(windows)]
+    fn target_rects(&self) -> Vec<(i32, i32, i32, i32)> {
+        if !self.monitor.is_empty() {
+            if let Some(m) = self.monitors.iter().find(|m| m.name == self.monitor) {
+                if let Some((l, t, r, b)) = m.rect {
+                    return vec![(l, t, (r - l).max(1), (b - t).max(1))];
+                }
+            }
+        } else {
+            let rects: Vec<(i32, i32, i32, i32)> = self
+                .monitors
+                .iter()
+                .filter_map(|m| {
+                    m.rect
+                        .map(|(l, t, r, b)| (l, t, (r - l).max(1), (b - t).max(1)))
+                })
+                .collect();
+            if !rects.is_empty() {
+                return rects;
+            }
+        }
+        let (x, y, w, h) = wallmotion_win::canvas::sys::virtual_screen();
+        vec![(x, y, w, h)]
+    }
+
+    /// Seamless-ish switch reusing each monitor's canvas: no new
+    /// windows, no teardown flash. Predecessors are reaped FIRST (mpv
+    /// never paints into a covered canvas, and two renderers on one HWND
+    /// freeze); frozen last frames bridge the startups. A stale layout
+    /// falls back to a full rebuild.
     fn switch_video(&mut self, path: PathBuf) {
-        let Some(mut old) = self.running.take() else {
+        let old_primary = self.running.take();
+        let mut old_extra: Vec<RunningVideo> = std::mem::take(&mut self.extra);
+        if old_primary.is_none() && old_extra.is_empty() {
             self.set_video(path);
             return;
+        }
+        // Reuse iff the monitor layout is unchanged (same rects, same order).
+        #[cfg(windows)]
+        let reuse = {
+            let mut olds: Vec<(i32, i32, i32, i32)> = vec![];
+            if let Some(ref run) = old_primary {
+                olds.push(run.rect);
+            }
+            olds.extend(old_extra.iter().map(|r| r.rect));
+            olds == self.target_rects()
         };
-        if !self.canvas_current(&old) {
+        #[cfg(not(windows))]
+        let reuse = false;
+        if !reuse {
+            if let Some(run) = old_primary {
+                reap_runner(run);
+            }
+            for run in old_extra.drain(..) {
+                reap_runner(run);
+            }
+            self.set_video(path);
+            return;
+        }
+        debug_log(&format!("switch {}", path.display()));
+        let mut olds: Vec<RunningVideo> = vec![];
+        if let Some(run) = old_primary {
+            olds.push(run);
+        }
+        olds.append(&mut old_extra);
+        // Reap ALL predecessors first, then spawn ALL successors
+        // back-to-back so every monitor warms up in parallel.
+        let mut stages: Vec<(isize, (i32, i32, i32, i32))> = vec![];
+        for old in olds {
+            #[cfg(windows)]
+            let rect = old.rect;
+            #[cfg(not(windows))]
+            let rect = (0, 0, 1, 1);
+            let canvas = old.canvas;
             let mut old = old;
             let _ = old.child.kill();
             let _ = old.child.wait();
+            // Black baseline: the sync probe below must fire on the NEW
+            // first frames, never on a reused stale picture.
             #[cfg(windows)]
-            wallmotion_win::canvas::sys::destroy_canvas(old.canvas);
-            #[cfg(not(windows))]
-            let _ = old.canvas;
-            self.set_video(path);
-            return;
+            wallmotion_win::canvas::sys::clear_canvas(canvas);
+            stages.push((canvas, rect));
         }
-        let _ = old.child.kill();
-        let _ = old.child.wait();
-        let canvas = old.canvas;
-        #[cfg(windows)]
-        let rect = old.rect;
-        #[cfg(not(windows))]
-        let rect = (0, 0, 1, 1);
-        debug_log(&format!("switch {}", path.display()));
-        match self.launch_video(canvas, rect, &path, self.muted) {
-            Ok(run) => {
-                self.running = Some(run);
-                self.paused = false;
-                self.auto_paused = false;
-                self.auto.reset();
-                #[cfg(windows)]
-                {
-                    self.status = self.video_status();
+        let mut fresh: Vec<RunningVideo> = vec![];
+        let mut failed: Option<String> = None;
+        for (i, (canvas, rect)) in stages.into_iter().enumerate() {
+            let audible = i == 0;
+            match self.launch_video(canvas, rect, &path, self.muted || !audible, audible) {
+                Ok(run) => fresh.push(run),
+                Err(msg) => {
+                    failed = Some(msg);
                 }
             }
-            Err(msg) => {
+        }
+        if fresh.is_empty() {
+            if let Some(msg) = failed {
                 self.status = msg;
             }
+            return;
         }
+        let mut it = fresh.into_iter();
+        self.running = it.next();
+        self.extra = it.collect();
+        self.paused = false;
+        self.auto_paused = false;
+        self.auto.reset();
+        #[cfg(windows)]
+        {
+            self.status = self.video_status();
+        }
+        if failed.is_some() {
+            debug_log("switch: some monitors failed to start");
+        }
+        self.arm_sync();
     }
 
+    /// Fresh playback of `path` on every selected monitor (first one
+    /// audible, the rest muted). Any previous runners are reaped first.
+    /// Two phases so all mpvs start back-to-back and warm up in
+    /// parallel: canvases first, spawns second.
     fn set_video(&mut self, path: PathBuf) {
+        if let Some(run) = self.running.take() {
+            reap_runner(run);
+        }
+        for run in self.extra.drain(..) {
+            reap_runner(run);
+        }
         #[cfg(windows)]
         {
             use wallmotion_win::canvas::sys as canvas;
-            let (x, y, w, h) = self.selected_rect();
-            let wc = match canvas::setup_wallpaper_canvas(x, y, w, h) {
-                Some(wc) => wc,
-                None => {
-                    self.status = i18n::tr(self.lang, "no_canvas");
-                    return;
+            // Phase 1: canvases (window setup can reshuffle the desktop).
+            let mut stages: Vec<(isize, (i32, i32, i32, i32))> = vec![];
+            let mut failed: Option<String> = None;
+            for (x, y, w, h) in self.target_rects() {
+                match canvas::setup_wallpaper_canvas(x, y, w, h) {
+                    Some(wc) => stages.push((wc.canvas, (x, y, w, h))),
+                    None => {
+                        failed = Some(i18n::tr(self.lang, "no_canvas"));
+                        break;
+                    }
                 }
-            };
-            match self.launch_video(wc.canvas, (x, y, w, h), &path, self.muted) {
-                Ok(run) => {
-                    self.status = self.video_status();
-                    self.running = Some(run);
-                }
-                Err(msg) => {
-                    canvas::destroy_canvas(wc.canvas);
+            }
+            if stages.is_empty() {
+                if let Some(msg) = failed {
                     self.status = msg;
                 }
+                return;
+            }
+            // Phase 2: spawns back-to-back (parallel warmup).
+            for (i, (canvas, rect)) in stages.into_iter().enumerate() {
+                let audible = i == 0;
+                match self.launch_video(canvas, rect, &path, self.muted || !audible, audible) {
+                    Ok(run) => {
+                        if self.running.is_none() {
+                            self.status = self.video_status();
+                            self.running = Some(run);
+                        } else {
+                            self.extra.push(run);
+                        }
+                    }
+                    Err(msg) => {
+                        canvas::destroy_canvas(canvas);
+                        failed = Some(msg);
+                        break;
+                    }
+                }
+            }
+            if self.running.is_none() {
+                if let Some(msg) = failed {
+                    self.status = msg;
+                }
+            } else {
+                if failed.is_some() {
+                    debug_log("set_video: some monitors failed to start");
+                }
+                self.arm_sync();
             }
         }
         #[cfg(not(windows))]
@@ -2089,12 +2223,62 @@ impl App {
     }
 
     fn apply_mute_volume(&mut self) {
-        if let Some(run) = &self.running {
-            ipc_set(&run.ipc, "mute", &IpcValue::Bool(self.muted));
-            if !self.muted {
+        // The audible runner follows the user settings; monitor echoes
+        // stay muted no matter what (one video must not echo).
+        for run in self.running.iter().chain(self.extra.iter()) {
+            let muted = self.muted || !run.audible;
+            ipc_set(&run.ipc, "mute", &IpcValue::Bool(muted));
+            if !muted {
                 ipc_set(&run.ipc, "volume", &IpcValue::Int(self.volume as i64));
             }
         }
+    }
+
+    /// Unpause fresh runners together once every canvas paints (or the
+    /// 3 s deadline): all monitors start the video together. mpv already
+    /// spawns frozen (`--pause`), so nothing can play early and skew the
+    /// start — this only releases. Honors a pause the user hits
+    /// meanwhile. Everything runs on a worker thread at 10 ms granularity
+    /// (UI frames at ~50 ms are too coarse for the last tenth).
+    /// Best effort.
+    fn arm_sync(&mut self) {
+        let runners: Vec<(String, isize)> = self
+            .running
+            .iter()
+            .chain(self.extra.iter())
+            .map(|run| (run.ipc.clone(), run.canvas))
+            .collect();
+        if runners.is_empty() {
+            return;
+        }
+        let resume = !self.paused && !self.auto_paused;
+        std::thread::spawn(move || {
+            use std::time::{Duration, Instant};
+            use wallmotion_player::{ipc_set, IpcValue};
+            let deadline = Instant::now() + Duration::from_millis(3000);
+            loop {
+                #[cfg(windows)]
+                let painted = {
+                    use wallmotion_win::canvas::sys as canvas;
+                    runners.iter().all(|(_, canvas)| {
+                        canvas::canvas_brightness(*canvas)
+                            .map(|b| b > SYNC_BRIGHTNESS)
+                            .unwrap_or(false)
+                    })
+                };
+                #[cfg(not(windows))]
+                let painted = true;
+                if painted || Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if resume {
+                for (ipc, _) in &runners {
+                    ipc_set(ipc, "pause", &IpcValue::Bool(false));
+                }
+            }
+        });
     }
 }
 
@@ -2314,25 +2498,34 @@ impl eframe::App for App {
         // Rotation tick (video-end driven; images dwell on interval).
         self.rotation_tick();
         // Z-order watchdog: opaque WorkerW backgrounds drift above our
-        // canvas (video vanishes, audio plays on). Re-pin below icons,
+        // canvases (video vanishes, audio plays on). Re-pin below icons,
         // logging only real reorderings (plus mpv aliveness for diagnosis).
-        if self.running.is_some() && self.last_zcheck.elapsed() >= std::time::Duration::from_secs(2)
-        {
+        if self.any_running() && self.last_zcheck.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_zcheck = std::time::Instant::now();
             #[cfg(windows)]
-            if let Some(run) = &self.running {
+            {
                 use wallmotion_win::canvas::sys as canvas;
-                if !canvas::canvas_below_defview(run.canvas) {
-                    debug_log(&format!("zfix tree: {}", canvas::debug_desktop_tree()));
-                    canvas::ensure_below_defview(run.canvas);
+                if let Some(run) = &self.running {
+                    if !canvas::canvas_below_defview(run.canvas) {
+                        debug_log(&format!("zfix tree: {}", canvas::debug_desktop_tree()));
+                        canvas::ensure_below_defview(run.canvas);
+                    }
+                }
+                for run in &self.extra {
+                    if !canvas::canvas_below_defview(run.canvas) {
+                        canvas::ensure_below_defview(run.canvas);
+                    }
                 }
             }
-            mpv_poll_log(
-                self.running
-                    .as_mut()
-                    .is_some_and(|run| matches!(run.child.try_wait(), Ok(None))),
-                &self.file,
-            );
+            let alive = self
+                .running
+                .as_mut()
+                .is_some_and(|run| matches!(run.child.try_wait(), Ok(None)))
+                || self
+                    .extra
+                    .iter_mut()
+                    .any(|run| matches!(run.child.try_wait(), Ok(None)));
+            mpv_poll_log(alive, &self.file);
         }
         // Autopause poll (Python POLL_INTERVAL_MS): pause at once, resume
         // after 2 clean polls. Throttled — update() runs every ~50ms.
@@ -2401,6 +2594,17 @@ fn accent_color(dark: bool) -> egui::Color32 {
     } else {
         egui::Color32::from_rgb(93, 72, 200)
     }
+}
+
+/// Kill a runner's mpv and destroy its canvas. Takes ownership so no
+/// stale handles survive a switch/stop (multi-monitor: one per screen).
+fn reap_runner(mut run: RunningVideo) {
+    let _ = run.child.kill();
+    let _ = run.child.wait();
+    #[cfg(windows)]
+    wallmotion_win::canvas::sys::destroy_canvas(run.canvas);
+    #[cfg(not(windows))]
+    let _ = run.canvas;
 }
 
 /// Whole-app style: brand accent selection, rounded widgets/windows.

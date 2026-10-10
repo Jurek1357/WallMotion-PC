@@ -20,9 +20,9 @@ pub enum IpcValue {
     Str(String),
 }
 
-/// One `set_property` command line for mpv (trailing newline included).
-pub fn ipc_message(prop: &str, value: &IpcValue) -> String {
-    let val = match value {
+/// One IPC value rendered as JSON.
+pub fn ipc_value(value: &IpcValue) -> String {
+    match value {
         IpcValue::Bool(true) => "true".to_string(),
         IpcValue::Bool(false) => "false".to_string(),
         IpcValue::Int(n) => n.to_string(),
@@ -30,8 +30,28 @@ pub fn ipc_message(prop: &str, value: &IpcValue) -> String {
             let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
             format!("\"{escaped}\"")
         }
-    };
-    format!("{{\"command\":[\"set_property\",\"{prop}\",{val}]}}\n")
+    }
+}
+
+/// One `set_property` command line for mpv (trailing newline included).
+pub fn ipc_message(prop: &str, value: &IpcValue) -> String {
+    format!(
+        "{{\"command\":[\"set_property\",\"{prop}\",{}]}}\n",
+        ipc_value(value)
+    )
+}
+
+/// One multi-argument command line (e.g. `seek`: `["seek",0,"absolute"]`).
+pub fn ipc_command_line(command: &str, args: &[IpcValue]) -> String {
+    let mut parts = vec![format!("\"{command}\"")];
+    parts.extend(args.iter().map(ipc_value));
+    format!("{{\"command\":[{}]}}\n", parts.join(","))
+}
+
+/// Send one multi-argument command. Never panics; false when mpv is
+/// unreachable.
+pub fn ipc_command(endpoint: &str, command: &str, args: &[IpcValue]) -> bool {
+    send_line(endpoint, &ipc_command_line(command, args))
 }
 
 /// Volume 0.0-1.0 mapped to mpv 0-100.
@@ -129,12 +149,16 @@ pub struct SpawnOptions {
 /// `--no-config` + `--load-scripts=no` keep startup fast (no user
 /// config/script/font probing): every rotation switch spawns a fresh
 /// mpv, so startup milliseconds are visible as black frames.
+/// `--pause` starts frozen on frame 0: the app unpauses every monitor
+/// together once all first frames are painted (no stagger, no early
+/// audio blip racing the pause command).
 pub fn mpv_args(opts: &SpawnOptions) -> Vec<String> {
     let mut args = vec![
         format!("--wid={}", opts.wid),
         "--no-config".to_string(),
         "--load-scripts=no".to_string(),
         "--no-osc".to_string(),
+        "--pause".to_string(),
         "--no-input-default-bindings".to_string(),
         if opts.loop_file {
             "--loop-file=inf".to_string()
@@ -291,6 +315,18 @@ mod tests {
     }
 
     #[test]
+    fn ipc_command_shapes() {
+        assert_eq!(
+            ipc_command_line(
+                "seek",
+                &[IpcValue::Int(0), IpcValue::Str("absolute".into())]
+            ),
+            "{\"command\":[\"seek\",0,\"absolute\"]}\n"
+        );
+        assert_eq!(ipc_command_line("quit", &[]), "{\"command\":[\"quit\"]}\n");
+    }
+
+    #[test]
     fn volume_mapping() {
         assert_eq!(volume_to_mpv(0.6), 60);
         assert_eq!(volume_to_mpv(5.0), 100);
@@ -324,6 +360,8 @@ mod tests {
         let args = mpv_args(&opts());
         assert!(args.contains(&"--no-config".to_string()));
         assert!(args.contains(&"--load-scripts=no".to_string()));
+        // Frozen first frame until the app unpauses all monitors at once.
+        assert!(args.contains(&"--pause".to_string()));
     }
 
     #[test]

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-10-10
+
+### Added
+- Multi-monitor playback: Monitor "all" plays the same video fullscreen
+  on every screen (first audible, the rest muted); pause, mute, volume,
+  rotation and watchdog cover all runners.
+- Frame-sync monitor start: frozen mpv spawn (`--pause`) with a
+  brightness-gated threaded unpause, so every screen starts together.
+- mpv fast-start flags (`--no-config`, `--load-scripts=no`) and a
+  multi-argument IPC command (seek) with tests.
+
+### Changed
+- Batch canvas setup + back-to-back mpv spawns for parallel warmup.
+- Mute is global again (only volume is remembered per file).
+- More readable texts across settings and library.
+
 ## [1.1.2] - 2026-10-09
 
 ### Added

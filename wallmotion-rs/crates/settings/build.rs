@@ -9,6 +9,10 @@ fn main() {
     // Windows only: exe file icon (Explorer, taskbar, Alt-Tab).
     // The window title-bar + tray icons are set at runtime from
     // `assets/icon.png` (see `app_icon_rgba` in main.rs).
+    // Compile-time gate (not just the runtime check below): the crate
+    // is a Windows-only build-dependency, so other platforms must not
+    // even name it.
+    #[cfg(windows)]
     if std::env::var("CARGO_CFG_WINDOWS").is_ok() {
         embed_resource::compile("app.rc", embed_resource::NONE);
     }

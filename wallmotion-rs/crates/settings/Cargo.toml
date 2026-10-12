@@ -39,7 +39,7 @@ embed-resource = "2"
 name = "wallmotion"
 maintainer = "Jurek1357 <https://github.com/Jurek1357/WallMotion-PC>"
 copyright = "2026, WallMotion contributors"
-license-file = ["../LICENSE", "0"]
+license-file = ["../../../LICENSE", "0"]
 section = "graphics"
 priority = "optional"
 depends = "ffmpeg"
@@ -49,7 +49,7 @@ Settings window with a wallpaper library, YouTube downloads, rotation, \
 per-monitor selection and autostart. Companion tools (yt-dlp) \
 self-install on first launch."""
 assets = [
-    ["target/release/wallmotion-settings", "usr/bin/", "755"],
-    ["../installer/linux/wallmotion-settings.desktop", "usr/share/applications/", "644"],
-    ["../assets/icon.png", "usr/share/icons/hicolor/48x48/apps/wallmotion-settings.png", "644"],
+    ["../../target/release/wallmotion-settings", "usr/bin/", "755"],
+    ["../../../installer/linux/wallmotion-settings.desktop", "usr/share/applications/", "644"],
+    ["../../../assets/icon.png", "usr/share/icons/hicolor/48x48/apps/wallmotion-settings.png", "644"],
 ]

@@ -24,7 +24,7 @@ jobs:
         run: Copy-Item wallmotion-rs\target\release\wallmotion-settings.exe WallMotion-Settings.exe
 
       - name: Upload exe artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: WallMotion-Settings-exe
           path: WallMotion-Settings.exe
@@ -56,7 +56,7 @@ jobs:
           & $env:ISCC installer/windows/WallMotion.iss /DAppVersion=$tag
 
       - name: Upload setup artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: WallMotion-Setup
           path: dist-installer/*.exe
@@ -84,7 +84,7 @@ jobs:
         working-directory: wallmotion-rs
 
       - name: Upload deb artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: WallMotion-deb
           path: wallmotion-rs/target/debian/*.deb

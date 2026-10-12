@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional SignPath code signing via manual workflow (see
   `docs/SIGNING.md`).
 
+### Fixed
+- Restart after in-app update: no `start` title-parsing, verbatim
+  (`\\?\`) prefix stripped at shell boundaries, autostart entry
+  tolerates old unquoted paths.
+- Released binaries report the correct internal version (workspace
+  bump), so the updater no longer re-offers the installed release.
+
 ## [1.1.4] - 2026-10-12
 
 ### Added

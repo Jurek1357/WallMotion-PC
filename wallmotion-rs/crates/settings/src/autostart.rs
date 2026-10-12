@@ -22,10 +22,20 @@ pub fn run_command(exe: &str) -> String {
 }
 
 /// Current exe path for the Run value (`None` when it cannot be known).
+/// Verbatim (`\\?\`) prefixes are stripped: the shell (logon launcher)
+/// handles plain paths, and stripping keeps old and new entries
+/// comparable in [`is_enabled`].
 pub fn current_exe_string() -> Option<String> {
-    std::env::current_exe()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
+    std::env::current_exe().ok().map(|p| {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+        s.into_owned()
+    })
 }
 
 /// True when the Run value exists and points at this exe with `--minimized`.
@@ -33,7 +43,16 @@ pub fn current_exe_string() -> Option<String> {
 pub fn is_enabled() -> bool {
     let expected = current_exe_string().map(|e| run_command(&e));
     match (read_run_value(), expected) {
-        (Some(stored), Some(expected)) => stored.trim() == expected,
+        (Some(stored), Some(expected)) => {
+            // Older entries may still carry the verbatim prefix.
+            let norm = stored
+                .trim()
+                .strip_prefix(r"\\?\UNC\")
+                .map(|r| format!(r"\\{r}"))
+                .or_else(|| stored.trim().strip_prefix(r"\\?\").map(|r| r.to_string()))
+                .unwrap_or_else(|| stored.trim().to_string());
+            norm == expected
+        }
         _ => false,
     }
 }

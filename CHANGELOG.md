@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-10-12
+
+### Added
+- Library sorting (name/newest/size) and type filter (all/videos/images).
+- Detail meta with localized kind, size and relative age.
+
+### Changed
+- Bigger library cards and detail preview; readable selected
+  dropdown text on the accent fill.
+
 ## [1.1.3] - 2026-10-10
 
 ### Added

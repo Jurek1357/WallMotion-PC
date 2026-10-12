@@ -269,7 +269,8 @@ pub fn spawn_playlist_fetch(
 }
 
 /// Download a file with `curl.exe`, falling back to PowerShell.
-fn fetch_url(url: &str, dest: &Path) -> Result<(), String> {
+/// Shared with the in-app updater (same no-new-deps approach).
+pub(crate) fn fetch_url(url: &str, dest: &Path) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
     }

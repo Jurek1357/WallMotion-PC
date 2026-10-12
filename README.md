@@ -33,7 +33,11 @@ follow-system toggle,
 
 Video wallpapers need `mpv` on PATH (the classic exe brings its own
 decoder; the native one drives mpv). Everything else the native app
-downloads itself on first click. Build from source with a Rust
+downloads itself on first launch (yt-dlp + ffmpeg auto-install, daily
+update checks with one-click install + restart). Prefer the Windows
+installer (`WallMotion-Setup-*.exe`: folder picker, optional media
+tools, Start Menu entry, autostart) or the Linux `.deb` over the bare
+exe. Build from source with a Rust
 toolchain (`winget install Rustlang.Rustup.Beta` + MinGW-w64 or MSVC):
 
 ```bash

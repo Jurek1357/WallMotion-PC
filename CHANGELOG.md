@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- In-app updates from GitHub Releases (daily silent check, one-click
+  download + restart install, skippable versions).
+- Windows installer (Inno Setup): folder picker, optional yt-dlp +
+  ffmpeg download, Start Menu entry, autostart, user-PATH task.
+- Linux `.deb` package (Debian/Ubuntu, `ffmpeg` dependency).
+- Optional SignPath code signing via manual workflow (see
+  `docs/SIGNING.md`).
+
 ## [1.1.4] - 2026-10-12
 
 ### Added

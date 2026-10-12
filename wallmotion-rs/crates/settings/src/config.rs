@@ -52,6 +52,13 @@ pub struct AppConfig {
     /// Follow the OS theme (registry on Windows). Same key as Python.
     #[serde(default)]
     pub theme_follow_system: bool,
+    /// Last update-check time (Unix seconds). Drives the daily silent
+    /// auto-check for in-app updates.
+    #[serde(default)]
+    pub update_checked_at: u64,
+    /// Release tag the user skipped ("don't offer this one again").
+    #[serde(default)]
+    pub update_skipped: String,
 }
 
 /// Rotation playlist state for serde. Validation (interval whitelist)
@@ -153,6 +160,8 @@ impl Default for AppConfig {
             lang: default_lang(),
             theme: default_theme(),
             theme_follow_system: false,
+            update_checked_at: 0,
+            update_skipped: String::new(),
         }
     }
 }
@@ -212,6 +221,8 @@ mod tests {
             lang: default_lang(),
             theme: default_theme(),
             theme_follow_system: false,
+            update_checked_at: 0,
+            update_skipped: String::new(),
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

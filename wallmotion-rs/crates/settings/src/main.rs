@@ -19,6 +19,7 @@ mod instance;
 mod library;
 mod remote;
 mod theme;
+mod update;
 mod youtube;
 
 use config::AppConfig;
@@ -336,6 +337,18 @@ struct App {
     tool_rx: Option<std::sync::mpsc::Receiver<youtube::YtEvent>>,
     tool_busy: bool,
     tools_auto_started: bool,
+    // In-app updater (own channel; Windows only for install).
+    upd_rx: Option<std::sync::mpsc::Receiver<update::UpdateEvent>>,
+    upd_busy: bool,
+    /// Silent auto-check (no status noise) vs. manual button.
+    upd_quiet: bool,
+    upd_status: String,
+    upd_latest: Option<String>,
+    upd_url: Option<String>,
+    upd_ready: bool,
+    upd_auto_done: bool,
+    upd_checked_at: u64,
+    upd_skipped: String,
     // Library gallery (Lively-style tab).
     tab: Tab,
     favorites: std::collections::HashSet<String>,
@@ -568,6 +581,16 @@ impl Default for App {
             tool_rx: None,
             tool_busy: false,
             tools_auto_started: false,
+            upd_rx: None,
+            upd_busy: false,
+            upd_quiet: true,
+            upd_status: String::new(),
+            upd_latest: None,
+            upd_url: None,
+            upd_ready: false,
+            upd_auto_done: false,
+            upd_checked_at: saved.update_checked_at,
+            upd_skipped: saved.update_skipped.clone(),
             tab: Tab::Settings,
             favorites: saved.favorites.into_iter().collect(),
             lib_search: String::new(),
@@ -686,6 +709,8 @@ impl App {
             lang: self.lang.code().to_string(),
             theme: self.theme.code().to_string(),
             theme_follow_system: self.follow_system,
+            update_checked_at: self.upd_checked_at,
+            update_skipped: self.upd_skipped.clone(),
         }
         .save();
     }
@@ -1347,6 +1372,11 @@ impl App {
         }); // rotation card
         ui.add_space(8.0);
         self.youtube_card(ui, ctx);
+        #[cfg(windows)]
+        {
+            ui.add_space(8.0);
+            self.update_section(ui, ctx);
+        }
     }
 
     /// YouTube download card (under the preview in wide mode, last in
@@ -1358,6 +1388,153 @@ impl App {
                 .default_open(true)
                 .show(ui, |ui| {
                     self.youtube_section(ui, ctx);
+                });
+        });
+    }
+
+    /// Drain in-app updater events (check results, download done, errors).
+    fn poll_update_events(&mut self) {
+        let events: Vec<update::UpdateEvent> = self
+            .upd_rx
+            .as_ref()
+            .map(|rx| {
+                let mut out = Vec::new();
+                while let Ok(ev) = rx.try_recv() {
+                    out.push(ev);
+                }
+                out
+            })
+            .unwrap_or_default();
+        for ev in events {
+            match ev {
+                update::UpdateEvent::Checked { latest, url } => {
+                    self.upd_busy = false;
+                    self.upd_rx = None;
+                    self.upd_checked_at = update::now_secs();
+                    self.persist();
+                    match url {
+                        Some(u) if latest != self.upd_skipped => {
+                            self.upd_status =
+                                i18n::trf(self.lang, "upd_available", &[("v", &latest)]);
+                            self.upd_latest = Some(latest);
+                            self.upd_url = Some(u);
+                        }
+                        _ => {
+                            self.upd_latest = None;
+                            self.upd_url = None;
+                            if !self.upd_quiet {
+                                self.upd_status = i18n::tr(self.lang, "upd_current");
+                            }
+                        }
+                    }
+                }
+                update::UpdateEvent::Downloaded => {
+                    self.upd_busy = false;
+                    self.upd_rx = None;
+                    // Swap the build into place now; the restart below
+                    // only flips to the already-installed file.
+                    match update::install_update() {
+                        Ok(()) => {
+                            self.upd_ready = true;
+                            self.upd_status = i18n::tr(self.lang, "upd_ready");
+                        }
+                        Err(e) => {
+                            self.upd_status = e;
+                        }
+                    }
+                }
+                update::UpdateEvent::Error(e) => {
+                    self.upd_busy = false;
+                    self.upd_rx = None;
+                    if !self.upd_quiet {
+                        self.upd_status = e;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start a release check (quiet = silent auto-check, else the button).
+    fn start_update_check(&mut self, quiet: bool) {
+        if self.upd_busy {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.upd_rx = Some(rx);
+        self.upd_busy = true;
+        self.upd_quiet = quiet;
+        if !quiet {
+            self.upd_status = i18n::tr(self.lang, "upd_checking");
+        }
+        update::spawn_check(tx);
+    }
+
+    /// Updater card: current version, check/download/restart actions.
+    /// Windows only (an AppImage cannot swap itself the same way).
+    #[cfg(windows)]
+    fn update_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let dark = self.applied_style.unwrap_or(true);
+        settings_card(ui, dark, |ui| {
+            egui::CollapsingHeader::new(i18n::tr(self.lang, "upd_title"))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("v{}", update::current_version()))
+                            .small()
+                            .weak(),
+                    );
+                    if self.upd_busy {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            if !self.upd_status.is_empty() {
+                                ui.label(&self.upd_status);
+                            }
+                        });
+                    } else if self.upd_ready {
+                        ui.label(&self.upd_status);
+                        if big_accent_button(ui, dark, i18n::tr(self.lang, "upd_restart")).clicked()
+                        {
+                            match update::spawn_restart() {
+                                Ok(()) => {
+                                    TRAY_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                                Err(e) => {
+                                    self.upd_status = e;
+                                }
+                            }
+                        }
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(i18n::tr(self.lang, "upd_check")).clicked() {
+                                self.start_update_check(false);
+                            }
+                            if self.upd_url.is_some()
+                                && ui.button(i18n::tr(self.lang, "upd_download")).clicked()
+                            {
+                                if let Some(url) = self.upd_url.clone() {
+                                    let (tx, rx) = std::sync::mpsc::channel();
+                                    self.upd_rx = Some(rx);
+                                    self.upd_busy = true;
+                                    self.upd_quiet = false;
+                                    self.upd_status = i18n::tr(self.lang, "upd_downloading");
+                                    update::spawn_download(tx, url);
+                                    ctx.request_repaint();
+                                }
+                            }
+                            if self.upd_latest.is_some()
+                                && ui.button(i18n::tr(self.lang, "upd_skip")).clicked()
+                            {
+                                self.upd_skipped = self.upd_latest.take().unwrap_or_default();
+                                self.upd_url = None;
+                                self.upd_status.clear();
+                                self.persist();
+                            }
+                        });
+                        if !self.upd_status.is_empty() {
+                            ui.label(&self.upd_status);
+                        }
+                    }
                 });
         });
     }
@@ -2426,6 +2603,17 @@ impl eframe::App for App {
         }
         // YouTube worker events (progress, playlist, done, tool installs).
         self.poll_yt_events(ctx);
+        // In-app updater: silent daily check on first frame, then events.
+        #[cfg(windows)]
+        if !self.upd_auto_done {
+            self.upd_auto_done = true;
+            update::cleanup_leftovers();
+            if update::now_secs().saturating_sub(self.upd_checked_at) >= update::CHECK_INTERVAL_SECS
+            {
+                self.start_update_check(true);
+            }
+        }
+        self.poll_update_events();
         // Settings preview thumbnail (rebuilt only when the file changes).
         self.ensure_preview(ctx);
         // Theme: follow the OS (polled) or the manual sun button.

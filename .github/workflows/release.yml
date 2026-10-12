@@ -29,8 +29,64 @@ jobs:
           name: WallMotion-Settings-exe
           path: WallMotion-Settings.exe
 
-  publish:
+  build-installer:
     needs: [build-rs]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exe artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: WallMotion-Settings-exe
+          path: installer-piece
+
+      - name: Stage exe for Inno
+        run: New-Item -ItemType Directory -Force -Path wallmotion-rs\target\release | Out-Null; Copy-Item installer-piece\WallMotion-Settings.exe wallmotion-rs\target\release\wallmotion-settings.exe
+
+      - name: Locate Inno Setup (preinstalled, else choco)
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\iscc.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "C:\Program Files (x86)\Inno Setup 6\iscc.exe" }
+          echo "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: Build installer
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          & $env:ISCC installer/windows/WallMotion.iss /DAppVersion=$tag
+
+      - name: Upload setup artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: WallMotion-Setup
+          path: dist-installer/*.exe
+
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux GUI + deb deps
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev dpkg-dev liblzma-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build deb (version from tag)
+        run: cargo deb --release -p wallmotion-settings --deb-version "${GITHUB_REF_NAME#v}"
+        working-directory: wallmotion-rs
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: WallMotion-deb
+          path: wallmotion-rs/target/debian/*.deb
+
+  publish:
+    needs: [build-rs, build-installer, build-deb]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -45,6 +101,11 @@ jobs:
           files: release-assets/*
           generate_release_notes: true
           body: |
-            The native WallMotion app (beta) — no Python, no installer.
-            Needs **mpv on PATH** for video wallpapers. The classic Python
-            app stays available in older releases and in the sources.
+            The native WallMotion app — no Python needed.
+            - **Windows:** prefer `WallMotion-Setup-*.exe` (installer with
+              optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the
+              portable `WallMotion-Settings.exe` with in-app updates.
+            - **Linux:** `wallmotion_*.deb` (needs `ffmpeg` from your distro;
+              tools self-install on first launch).
+            Needs **mpv** for video wallpapers. The classic Python app stays
+            available in older releases and in the sources.

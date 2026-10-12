@@ -20,3 +20,5 @@ wallmotion.png
 
 # Rust build cache
 target/
+
+dist-installer/

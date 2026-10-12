@@ -28,22 +28,15 @@ pub struct MediaItem {
     pub name: String,
     pub kind: MediaKind,
     pub size: u64,
+    /// Last-modified time (sorting newest-first; None when unreadable).
+    pub modified: Option<std::time::SystemTime>,
 }
 
-/// Image or video.
+/// Image or video (labels are localized in the UI layer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
     Image,
     Video,
-}
-
-impl MediaKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            MediaKind::Image => "image",
-            MediaKind::Video => "video",
-        }
-    }
 }
 
 fn kind_of(name: &str) -> Option<MediaKind> {
@@ -165,8 +158,15 @@ pub fn list_media(directory: &Path) -> Vec<MediaItem> {
         .into_iter()
         .filter_map(|name| {
             let full = directory.join(&name);
-            let size = std::fs::metadata(&full).ok()?.len();
-            kind_of(&name).map(|kind| MediaItem { name, kind, size })
+            let meta = std::fs::metadata(&full).ok()?;
+            let size = meta.len();
+            let modified = meta.modified().ok();
+            kind_of(&name).map(|kind| MediaItem {
+                name,
+                kind,
+                size,
+                modified,
+            })
         })
         .collect()
 }

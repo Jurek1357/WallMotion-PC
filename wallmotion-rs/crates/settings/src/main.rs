@@ -342,6 +342,8 @@ struct App {
     lib_search: String,
     lib_fav_only: bool,
     lib_selected: Option<String>,
+    lib_sort: LibSort,
+    lib_type: LibType,
     // Language + theme (header toggles, same keys as the Python app).
     lang: i18n::Lang,
     theme: theme::AppTheme,
@@ -374,6 +376,44 @@ enum LibAction {
     AddRot(String),
     Delete(String),
     ToggleFav(String),
+}
+
+/// Library sort order (session-only, toolbar combo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LibSort {
+    #[default]
+    Name,
+    Newest,
+    Biggest,
+}
+
+impl LibSort {
+    fn key(self) -> &'static str {
+        match self {
+            LibSort::Name => "sort_name",
+            LibSort::Newest => "sort_newest",
+            LibSort::Biggest => "sort_size",
+        }
+    }
+}
+
+/// Library type filter (session-only, toolbar combo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LibType {
+    #[default]
+    All,
+    Video,
+    Image,
+}
+
+impl LibType {
+    fn key(self) -> &'static str {
+        match self {
+            LibType::All => "type_all",
+            LibType::Video => "type_video",
+            LibType::Image => "type_image",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -533,6 +573,8 @@ impl Default for App {
             lib_search: String::new(),
             lib_fav_only: false,
             lib_selected: None,
+            lib_sort: LibSort::default(),
+            lib_type: LibType::default(),
             lang,
             theme,
             follow_system: saved.theme_follow_system,
@@ -1548,6 +1590,30 @@ impl App {
         );
         // Buttons on their own wrapped row: never pushed off-screen.
         ui.horizontal_wrapped(|ui| {
+            ui.label(i18n::tr(self.lang, "sort_label"));
+            egui::ComboBox::from_id_salt("lib_sort")
+                .selected_text(i18n::tr(self.lang, self.lib_sort.key()))
+                .show_ui(ui, |ui| {
+                    for mode in [LibSort::Name, LibSort::Newest, LibSort::Biggest] {
+                        ui.selectable_value(
+                            &mut self.lib_sort,
+                            mode,
+                            i18n::tr(self.lang, mode.key()),
+                        );
+                    }
+                });
+            ui.label(i18n::tr(self.lang, "type_label"));
+            egui::ComboBox::from_id_salt("lib_type")
+                .selected_text(i18n::tr(self.lang, self.lib_type.key()))
+                .show_ui(ui, |ui| {
+                    for kind in [LibType::All, LibType::Video, LibType::Image] {
+                        ui.selectable_value(
+                            &mut self.lib_type,
+                            kind,
+                            i18n::tr(self.lang, kind.key()),
+                        );
+                    }
+                });
             ui.checkbox(
                 &mut self.lib_fav_only,
                 i18n::tr(self.lang, "library_fav_only"),
@@ -1577,22 +1643,49 @@ impl App {
             .on_hover_text(dir.to_string_lossy().into_owned());
         }
         let query = self.lib_search.trim().to_lowercase();
-        let items: Vec<library::MediaItem> = self
+        let want_video = !matches!(self.lib_type, LibType::Image);
+        let want_image = !matches!(self.lib_type, LibType::Video);
+        let mut items: Vec<library::MediaItem> = self
             .library
             .iter()
             .filter(|it| {
                 if self.lib_fav_only && !self.favorites.contains(&it.name) {
                     return false;
                 }
+                match it.kind {
+                    library::MediaKind::Video => {
+                        if !want_video {
+                            return false;
+                        }
+                    }
+                    library::MediaKind::Image => {
+                        if !want_image {
+                            return false;
+                        }
+                    }
+                }
                 query.is_empty() || it.name.to_lowercase().contains(&query)
             })
             .cloned()
             .collect();
+        match self.lib_sort {
+            LibSort::Name => items.sort_by_key(|a| a.name.to_lowercase()),
+            LibSort::Biggest => items.sort_by(|a, b| {
+                b.size
+                    .cmp(&a.size)
+                    .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            }),
+            LibSort::Newest => items.sort_by(|a, b| {
+                b.modified
+                    .cmp(&a.modified)
+                    .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            }),
+        }
         let mut action: Option<LibAction> = None;
         // Responsive grid: columns follow the column width, rows flow down.
         let dark = self.applied_style.unwrap_or(true);
         let avail = ui.available_width().max(100.0);
-        let card_w = avail.clamp(110.0, 160.0);
+        let card_w = avail.clamp(140.0, 200.0);
         let ncols = ((avail / card_w).floor() as usize).max(1);
         egui::Grid::new("lib_grid")
             .num_columns(ncols)
@@ -1623,7 +1716,7 @@ impl App {
                             .show(ui, |ui| {
                                 // Fixed thumbnail box: every card ends up the
                                 // same height regardless of source aspect.
-                                const THUMB_H: f32 = 84.0;
+                                const THUMB_H: f32 = 110.0;
                                 let w = (card_w - 20.0).max(60.0);
                                 let thumb_layout =
                                     egui::Layout::centered_and_justified(egui::Direction::TopDown);
@@ -1709,8 +1802,8 @@ impl App {
                         // stretched across the panel (see #preview-stretch).
                         let size = tex.size_vec2();
                         let avail = c.available_width().max(80.0);
-                        let w = avail.min(320.0);
-                        let h = w * size.y / size.x.max(1.0);
+                        let w = avail.min(420.0);
+                        let h = (w * size.y / size.x.max(1.0)).min(260.0);
                         c.horizontal(|c| {
                             c.add_space(((avail - w) / 2.0).max(0.0));
                             c.image((tex.id(), egui::vec2(w, h)));
@@ -1718,14 +1811,14 @@ impl App {
                     }
                     c.label(egui::RichText::new(truncate_middle(&item.name, 60)).strong())
                         .on_hover_text(&item.name);
-                    c.label(
-                        egui::RichText::new(format!(
-                            "{} · {}",
-                            item.kind.label(),
-                            library::format_size(item.size)
-                        ))
-                        .weak(),
-                    );
+                    let kind_label = match item.kind {
+                        library::MediaKind::Video => i18n::tr(self.lang, "type_video"),
+                        library::MediaKind::Image => i18n::tr(self.lang, "type_image"),
+                    };
+                    c.horizontal_wrapped(|c| {
+                        c.label(egui::RichText::new(kind_label).weak());
+                        c.label(egui::RichText::new(format_size_age(self.lang, &item)).weak());
+                    });
                     c.add_space(4.0);
                     if big_accent_button(c, dark, i18n::tr(self.lang, "library_set")).clicked() {
                         action = Some(LibAction::Set(item.name.clone()));
@@ -2616,7 +2709,9 @@ fn apply_style(ctx: &egui::Context, dark: bool) {
     };
     let accent = accent_color(dark);
     visuals.selection.bg_fill = accent;
-    visuals.selection.stroke = egui::Stroke::new(1.0_f32, accent);
+    // Selected text (combo dropdowns, menus) uses the selection stroke
+    // color: keep it white so it stays readable on the accent fill.
+    visuals.selection.stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
     for w in [
         &mut visuals.widgets.noninteractive,
         &mut visuals.widgets.inactive,
@@ -2714,6 +2809,27 @@ fn is_image_path(path: &str) -> bool {
         .map(|e| e.to_string_lossy().to_lowercase())
         .map(|ext| IMAGES.contains(&ext.as_str()))
         .unwrap_or(false)
+}
+
+/// "2.0 MB · před 3 dny" style detail meta for a library item.
+fn format_size_age(lang: i18n::Lang, item: &library::MediaItem) -> String {
+    let size = library::format_size(item.size);
+    let age = match item.modified.and_then(|t| t.elapsed().ok()) {
+        None => return size,
+        Some(d) => {
+            let secs = d.as_secs();
+            if secs < 60 {
+                i18n::tr(lang, "age_now")
+            } else if secs < 3_600 {
+                i18n::trf(lang, "age_min", &[("n", &(secs / 60).to_string())])
+            } else if secs < 86_400 {
+                i18n::trf(lang, "age_hour", &[("n", &(secs / 3_600).to_string())])
+            } else {
+                i18n::trf(lang, "age_day", &[("n", &(secs / 86_400).to_string())])
+            }
+        }
+    };
+    format!("{size} · {age}")
 }
 
 /// Middle-truncate a long label to ~`max` chars (`very-lo…-name.mp4`).

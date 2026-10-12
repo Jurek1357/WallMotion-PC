@@ -76,7 +76,7 @@ jobs:
         run: cargo install cargo-deb --locked
 
       - name: Build deb (version from tag)
-        run: cargo deb --release -p wallmotion-settings --deb-version "${GITHUB_REF_NAME#v}"
+        run: cargo deb -p wallmotion-settings --deb-version "${GITHUB_REF_NAME#v}"
         working-directory: wallmotion-rs
 
       - name: Upload deb artifact

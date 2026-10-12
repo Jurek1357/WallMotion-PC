@@ -131,7 +131,7 @@ begin
       mbInformation, MB_OK);
 end;
 
-{ Append {app}\tools to the user PATH once (pathtools task). Takes
+{ Append the tools dir to the user PATH once (pathtools task). Takes
   effect for newly started programs; no admin needed (HKCU). }
 procedure AddToolsToPath();
 var

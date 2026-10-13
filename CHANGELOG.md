@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-10-13
+
+### Added
+- Library grid takes the full window width when nothing is selected;
+  the detail panel appears only after clicking a wallpaper.
+- Oldest-first library sorting (Name / Newest / Oldest).
+- Downloads folder is created on first launch, with a one-time
+  notice showing its path.
+
+### Changed
+- Library detail column capped at one third of the window
+  (max 340 px) instead of half.
+- Size sorting removed.
+
 ## [1.1.6] - 2026-10-12
 
 ### Fixed

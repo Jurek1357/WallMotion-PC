@@ -4437,11 +4437,11 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-core"
-version = "1.1.6"
+version = "1.1.7"
 
 [[package]]
 name = "wallmotion-demo"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "embed-manifest",
  "wallmotion-win",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-player"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "wallmotion-win",
  "windows 0.61.3",
@@ -4458,7 +4458,7 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-settings"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "eframe",
  "egui",
@@ -4477,7 +4477,7 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-win"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "image",
  "wallmotion-core",

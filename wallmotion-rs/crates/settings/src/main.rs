@@ -93,9 +93,11 @@ fn show_window(ctx: &egui::Context) {
 /// The window is NEVER really hidden (SW_HIDE stops the UI loop dead,
 /// which stalls rotation): it moves far off-screen and loses its
 /// taskbar button instead, so frames keep pumping while hidden.
+#[cfg(windows)]
 static APP_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 /// Window rect saved before off-screen hiding (restored on show).
+#[cfg(windows)]
 static SAVED_RECT: std::sync::Mutex<(i32, i32, i32, i32)> =
     std::sync::Mutex::new((100, 100, 940, 680));
 
@@ -446,6 +448,7 @@ struct MonitorChoice {
     rect: Option<(i32, i32, i32, i32)>,
 }
 
+#[cfg(windows)]
 fn monitor_label(
     lang: i18n::Lang,
     name: &str,
@@ -1520,6 +1523,7 @@ impl App {
     }
 
     /// Start a release check (quiet = silent auto-check, else the button).
+    #[cfg(windows)]
     fn start_update_check(&mut self, quiet: bool) {
         if self.upd_busy {
             return;

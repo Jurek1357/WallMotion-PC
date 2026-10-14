@@ -22,12 +22,16 @@ pub const ASSET_NAME: &str = "WallMotion-Settings.exe";
 /// Playback library shipped next to the exe since the libmpv switch
 /// (v1.2.0): fetched only when missing — a loaded DLL cannot be swapped
 /// while the app runs, and the client API is stable across our builds.
+#[allow(dead_code)]
 pub const DLL_ASSET_NAME: &str = "libmpv-2.dll";
+#[allow(dead_code)]
 pub const DLL_FILE_NAME: &str = "libmpv-2.dll";
 /// Silent auto-checks run at most this often (manual checks anytime).
+#[allow(dead_code)]
 pub const CHECK_INTERVAL_SECS: u64 = 24 * 3600;
 
 /// Events from background update workers to the UI thread.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum UpdateEvent {
     /// Check done: newest tag + download URL (`None` = we are current).
@@ -45,12 +49,14 @@ pub enum UpdateEvent {
 }
 
 /// Our build version (`wallmotion-core::VERSION`, workspace package).
+#[allow(dead_code)]
 pub fn current_version() -> &'static str {
     wallmotion_core::VERSION
 }
 
 /// `"v1.2.3"` / `"1.2"` → `(1, 2, 3)`. Missing parts are zero.
 /// Anything else → `None` (never offer an update we cannot compare).
+#[allow(dead_code)]
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let s = s.trim().strip_prefix(['v', 'V']).unwrap_or(s.trim());
     if s.is_empty() {
@@ -77,6 +83,7 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
 
 /// True when `latest` is strictly newer than `current`.
 /// Unparseable sides mean "don't touch anything" (`false`).
+#[allow(dead_code)]
 pub fn is_newer(current: &str, latest: &str) -> bool {
     match (parse_version(current), parse_version(latest)) {
         (Some(c), Some(l)) => l > c,
@@ -87,6 +94,7 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
 /// `(tag_name, exe_url, dll_url)` from a `releases/latest` JSON body.
 /// `None` on unexpected shape or when our exe asset is missing. The DLL
 /// URL is `None` for pre-libmpv releases (then nothing is fetched).
+#[allow(dead_code)]
 pub fn parse_release(body: &str) -> Option<(String, String, Option<String>)> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let tag = v.get("tag_name")?.as_str()?.to_string();
@@ -111,6 +119,7 @@ fn exe_path() -> Result<PathBuf, String> {
 /// Shell-facing path: `cmd.exe`/`start` cannot handle verbatim (`\\?\`)
 /// paths and report "cannot find '\\'". Filesystem APIs take the
 /// verbatim form fine, so only convert at shell boundaries.
+#[allow(dead_code)]
 fn shell_path(path: &Path) -> String {
     let s = path.to_string_lossy();
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
@@ -139,6 +148,7 @@ fn backup_path() -> Result<PathBuf, String> {
 
 /// Playback library next to the exe (load-time linked: present =
 /// playable, missing = video shows an error).
+#[allow(dead_code)]
 pub fn dll_path() -> Result<PathBuf, String> {
     let exe = exe_path()?;
     let dir = exe
@@ -148,12 +158,14 @@ pub fn dll_path() -> Result<PathBuf, String> {
 }
 
 /// True when the playback library is absent and must be fetched.
+#[allow(dead_code)]
 pub fn dll_missing() -> bool {
     dll_path().map(|p| !p.is_file()).unwrap_or(true)
 }
 
 /// Remove stale updater leftovers (previous backup / interrupted
 /// download). Best effort, runs once at startup.
+#[allow(dead_code)]
 pub fn cleanup_leftovers() {
     if let Ok(old) = backup_path() {
         let _ = std::fs::remove_file(old);
@@ -169,6 +181,7 @@ pub fn cleanup_leftovers() {
 }
 
 /// Check GitHub for a newer release on a background thread.
+#[allow(dead_code)]
 pub fn spawn_check(tx: Sender<UpdateEvent>) {
     std::thread::spawn(move || {
         let tmp = std::env::temp_dir().join("wallmotion-release.json");
@@ -207,6 +220,7 @@ pub fn spawn_check(tx: Sender<UpdateEvent>) {
 /// `fetch_dll` the playback library comes along too (only ever needed
 /// when missing: straight to its final name via a temp file, since no
 /// locked file is being replaced).
+#[allow(dead_code)]
 pub fn spawn_download(
     tx: Sender<UpdateEvent>,
     url: String,
@@ -277,6 +291,7 @@ pub fn install_update() -> Result<(), String> {
 /// caller quits. The exe runs quoted directly (no `start`: its title
 /// parsing chokes on some paths). No console window pops up (GUI
 /// subsystem + hidden cmd, which lingers invisibly until the app quits).
+#[allow(dead_code)]
 pub fn spawn_restart() -> Result<(), String> {
     let exe = shell_path(&exe_path()?);
     crate::debug_log(&format!("restart cmd: timeout 3 & \"{exe}\""));

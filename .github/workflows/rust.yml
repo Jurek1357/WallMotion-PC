@@ -69,11 +69,13 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Test binaries link libmpv: the DLL must be findable at runtime.
+      # (Absolute path: cargo runs each test with the package dir as cwd,
+      # so a relative entry would miss.)
       - name: Test (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $env:PATH = "deps/mpv-dev;$env:PATH"
+          $env:PATH = "$PWD\deps\mpv-dev;$env:PATH"
           cargo test --workspace
 
       - name: Test (Linux)

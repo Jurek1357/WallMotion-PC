@@ -17,6 +17,8 @@ pub const RUN_VALUE: &str = "WallMotion";
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 /// Command line stored in the Run value: quoted exe + `--minimized`.
+/// (Pure string logic; Linux builds keep it for tests.)
+#[allow(dead_code)]
 pub fn run_command(exe: &str) -> String {
     format!("\"{exe}\" --minimized")
 }
@@ -25,6 +27,7 @@ pub fn run_command(exe: &str) -> String {
 /// Verbatim (`\\?\`) prefixes are stripped: the shell (logon launcher)
 /// handles plain paths, and stripping keeps old and new entries
 /// comparable in [`is_enabled`].
+#[allow(dead_code)]
 pub fn current_exe_string() -> Option<String> {
     std::env::current_exe().ok().map(|p| {
         let s = p.to_string_lossy();
@@ -76,6 +79,7 @@ pub fn set_enabled(on: bool) -> Result<(), String> {
 
 /// Stub off Windows.
 #[cfg(not(windows))]
+#[allow(dead_code)]
 pub fn set_enabled(_on: bool) -> Result<(), String> {
     Err("autostart needs Windows".to_string())
 }

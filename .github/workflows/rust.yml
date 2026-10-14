@@ -84,7 +84,12 @@ jobs:
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
           $t = Get-ChildItem 'target\debug\deps\wallmotion_mpv-*.exe' | Select-Object -First 1
-          & (Join-Path $bindir 'dumpbin.exe') /dependents $t.FullName
+          $s = Get-ChildItem 'target\debug\deps\mpv_spike-*.exe' | Select-Object -First 1
+          $dump = Join-Path $bindir 'dumpbin.exe'
+          Write-Host "=== lib test binary dependents ==="
+          & $dump /dependents $t.FullName
+          Write-Host "=== spike binary dependents ==="
+          & $dump /dependents $s.FullName
           # Ask the loader directly which module it cannot load.
           Add-Type -Namespace Win32 -Name K32 -MemberDefinition '[DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr LoadLibrary(string p); [DllImport("kernel32.dll")] public static extern uint GetLastError();'
           foreach ($d in @("$PWD\target\debug\deps\libmpv-2.dll", "$PWD\deps\mpv-dev\libmpv-2.dll", 'vulkan-1.dll')) {

@@ -1,0 +1,49 @@
+name: Sign release
+
+# Manual code signing via SignPath (free for open source).
+# Setup first: docs/SIGNING.md (project slugs + repo secrets), then run
+# this workflow per release. Re-uploads signed binaries over the release
+# assets. Never runs automatically (no secrets = nothing to do).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sign (e.g. v1.1.5)"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    steps:
+      - name: Download release exes
+        run: gh release download "${{ inputs.tag }}" --dir to-sign --pattern "WallMotion-*.exe"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload as workflow artifact
+        id: unsigned
+        uses: actions/upload-artifact@v6
+        with:
+          name: to-sign
+          path: to-sign/*
+
+      # Slugs must match your SignPath project (see docs/SIGNING.md).
+      - name: Submit to SignPath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: wallmotion
+          artifact-configuration-slug: wallmotion-exe
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 600
+          output-artifact-directory: signed-out
+
+      - name: Replace release assets with signed builds
+        run: gh release upload "${{ inputs.tag }}" signed-out/* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

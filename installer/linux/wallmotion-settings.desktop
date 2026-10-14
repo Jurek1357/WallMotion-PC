@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=WallMotion
+Comment=Video and image wallpapers for your desktop
+Exec=wallmotion-settings
+Icon=wallmotion-settings
+Terminal=false
+Categories=Utility;DesktopSettings;
+StartupNotify=false

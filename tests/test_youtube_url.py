@@ -217,9 +217,51 @@ class TestMapDownloadError:
 
     def test_ffmpeg_hint(self, monkeypatch):
         import wallmotion.youtube as yt
-        monkeypatch.setattr(yt, "_ffmpeg_available", lambda: False)
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)
+        monkeypatch.setattr(yt, "_ffmpeg_works", lambda *a, **k: False)
         assert map_download_error(
             "ERROR: Requested format is not available") == "NEED_FFMPEG"
-        monkeypatch.setattr(yt, "_ffmpeg_available", lambda: True)
+        assert map_download_error(
+            "ERROR: You have requested merging of multiple formats "
+            "but ffmpeg is not installed.") == "NEED_FFMPEG"
+        monkeypatch.setattr(yt, "_ffmpeg_works", lambda *a, **k: True)
         assert map_download_error(
             "ERROR: Requested format is not available").startswith("ERROR:")
+
+
+class TestFfmpegWorks:
+    def test_no_exe(self, monkeypatch):
+        import wallmotion.youtube as yt
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)
+        monkeypatch.setattr(yt, "_ffmpeg_exe", lambda: None)
+        assert yt._ffmpeg_works() is False
+
+    def test_caches_result(self, monkeypatch):
+        import wallmotion.youtube as yt
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)
+        monkeypatch.setattr(yt, "_ffmpeg_exe", lambda: "/fake/ffmpeg")
+        calls = []
+
+        class FakeProc:
+            returncode = 0
+
+        def fake_run(*a, **k):
+            calls.append(a)
+            return FakeProc()
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert yt._ffmpeg_works() is True
+        assert yt._ffmpeg_works() is True
+        assert len(calls) == 1  # second call served from cache
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)
+
+    def test_failing_exe(self, monkeypatch):
+        import wallmotion.youtube as yt
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)
+        monkeypatch.setattr(yt, "_ffmpeg_exe", lambda: "/fake/ffmpeg")
+
+        def fake_run(*a, **k):
+            raise OSError("blocked")
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert yt._ffmpeg_works() is False
+        monkeypatch.setattr(yt, "_FFMPEG_OK", None)

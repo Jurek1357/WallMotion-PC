@@ -1,0 +1,55 @@
+[package]
+name = "wallmotion-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WallMotion native settings window (egui) over the Rust core"
+
+[[bin]]
+name = "wallmotion-settings"
+path = "src/main.rs"
+
+[dependencies]
+wallmotion-core = { path = "../core" }
+wallmotion-win = { path = "../win" }
+wallmotion-player = { path = "../player" }
+eframe = "0.31"
+egui = "0.31"
+image = "0.25"
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tray-icon = "0.19"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-manifest = "1"
+embed-resource = "2"
+
+# Debian package (cargo-deb, built in CI on tags). yt-dlp is NOT a
+# dependency on purpose: distro builds lag months behind (dead
+# downloader), the app fetches a fresh user-local copy itself.
+[package.metadata.deb]
+name = "wallmotion"
+maintainer = "Jurek1357 <https://github.com/Jurek1357/WallMotion-PC>"
+copyright = "2026, WallMotion contributors"
+license-file = ["../../../LICENSE", "0"]
+section = "graphics"
+priority = "optional"
+depends = "ffmpeg"
+extended-description = """\
+Video and image wallpapers for your desktop. \
+Settings window with a wallpaper library, YouTube downloads, rotation, \
+per-monitor selection and autostart. Companion tools (yt-dlp) \
+self-install on first launch."""
+assets = [
+    ["../../target/release/wallmotion-settings", "usr/bin/", "755"],
+    ["../../../installer/linux/wallmotion-settings.desktop", "usr/share/applications/", "644"],
+    ["../../../assets/icon.png", "usr/share/icons/hicolor/48x48/apps/wallmotion-settings.png", "644"],
+]

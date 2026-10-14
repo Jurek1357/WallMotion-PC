@@ -1,0 +1,10 @@
+[package]
+name = "wallmotion-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WallMotion core logic (platform paths, session detection) - no GUI, no OS bindings"
+
+[lib]
+name = "wallmotion_core"
+path = "src/lib.rs"

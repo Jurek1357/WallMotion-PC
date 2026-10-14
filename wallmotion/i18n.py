@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 
 ACCENT = "#7c5cff"
 
@@ -195,17 +194,15 @@ QComboBox QAbstractItemView::item {{
 
 
 def _locales_dir() -> str:
-    """Directory with cs.json / en.json (works in frozen exe via _MEIPASS)."""
+    """Directory with cs.json / en.json (frozen exe and source runs)."""
     try:
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return os.path.join(meipass, "locales")
-        return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "locales",
-        )
+        from wallmotion.utils import bundle_dir
+        base = bundle_dir()
+        if base:
+            return os.path.join(base, "locales")
     except Exception:
-        return "locales"
+        pass
+    return "locales"
 
 
 def _load_strings() -> dict:

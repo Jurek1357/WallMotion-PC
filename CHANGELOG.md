@@ -7,6 +7,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-10-13
+
+### Added
+- Library grid takes the full window width when nothing is selected;
+  the detail panel appears only after clicking a wallpaper.
+- Oldest-first library sorting (Name / Newest / Oldest).
+- Downloads folder is created on first launch, with a one-time
+  notice showing its path.
+
+### Changed
+- Library detail column capped at one third of the window
+  (max 340 px) instead of half.
+- Size sorting removed.
+
+## [1.1.6] - 2026-10-12
+
+### Fixed
+- Restart after in-app update: no `start` title-parsing, verbatim
+  (`\\?\`) prefix stripped at shell boundaries, autostart entry
+  tolerates old unquoted paths.
+- Released binaries report the correct internal version (workspace
+  bump), so the updater no longer re-offers the installed release.
+
+## [1.1.5] - 2026-10-12
+
+### Added
+- In-app updates from GitHub Releases (daily silent check, one-click
+  download + restart install, skippable versions).
+- Windows installer (Inno Setup, per-user): folder picker, optional
+  yt-dlp + ffmpeg download, Start Menu entry, autostart, user-PATH task.
+- Linux `.deb` package (Debian/Ubuntu, `ffmpeg` dependency).
+- Optional SignPath code signing via manual workflow (see
+  `docs/SIGNING.md`).
+
+## [1.1.4] - 2026-10-12
+
+### Added
+- Library sorting (name/newest/size) and type filter (all/videos/images).
+- Detail meta with localized kind, size and relative age.
+
+### Changed
+- Bigger library cards and detail preview; readable selected
+  dropdown text on the accent fill.
+
+## [1.1.3] - 2026-10-10
+
+### Added
+- Multi-monitor playback: Monitor "all" plays the same video fullscreen
+  on every screen (first audible, the rest muted); pause, mute, volume,
+  rotation and watchdog cover all runners.
+- Frame-sync monitor start: frozen mpv spawn (`--pause`) with a
+  brightness-gated threaded unpause, so every screen starts together.
+- mpv fast-start flags (`--no-config`, `--load-scripts=no`) and a
+  multi-argument IPC command (seek) with tests.
+
+### Changed
+- Batch canvas setup + back-to-back mpv spawns for parallel warmup.
+- Mute is global again (only volume is remembered per file).
+- More readable texts across settings and library.
+
+## [1.1.2] - 2026-10-09
+
+### Added
+- Rotation advances on video end (no timer); images dwell on the saved
+  interval, broken files are skipped, the last video loops.
+- Windows autostart checkbox (Run key, hidden `--minimized` resume).
+- `--minimized` CLI flag: start hidden to the tray and resume playback.
+- Live wallpaper preview card in Settings; controls left / preview
+  right on wide windows (stacked when narrow).
+- Collapsible Sound / Rotation / YouTube cards; single-instance port
+  gate (a second launch exits instead of forking a duplicate).
+
+### Changed
+- Video switches reuse the same canvas (no teardown flash); mute is
+  global again (only volume is remembered per file).
+- Hide-to-tray keeps the UI loop alive off-screen with no taskbar
+  button (Wallpaper-Engine style); rotation keeps playing while hidden.
+- Library cards share one thumbnail box size; bigger CTA buttons and
+  more readable texts; wide default window (940 px).
+
+### Fixed
+- Opaque WorkerW backgrounds covering the video (z-order watchdog
+  re-pins the canvas below the icons).
+- Duplicate app instances fighting over the desktop.
+
+## [1.1.1] - 2026-10-09
+
+### Added
+- yt-dlp + ffmpeg auto-install on first launch (background, no clicks
+  needed); the Get buttons stay as manual retry, Update stays for yt-dlp.
+- Live wallpaper preview card in Settings (video frames via ffmpeg),
+  with file name, play state and Set / Pause / Stop actions.
+- Windows autostart: "Start with Windows" checkbox (Run registry value
+  launching hidden with `--minimized`, resuming the last wallpaper).
+- `--minimized` CLI flag: start hidden to the tray and resume playback.
+- Wallpaper-Engine style side panels: controls left / preview right in
+  Settings, grid left / detail right in the library (stacked under
+  560 px); Sound / Rotation / YouTube cards are collapsible.
+
+### Changed
+- Settings reorganized into cards (Preview, Source, Sound & behavior,
+  Rotation, YouTube); file picker shows the name only (full path in
+  tooltip), volume slider fills the row, full-width Download / Cancel.
+- Library count shows the folder name (full path in tooltip); cards have
+  fills, fixed thumbnails and truncated names; single weak status line.
+
+## [1.1.0] - 2026-10-08
+
+### Added
+- Native `WallMotion-Settings.exe` beta, shipped next to the classic
+  app in every release (no Python, no console popups, logo + tray icon).
+- CZ/EN switch, light/dark theme + follow-system toggle, brand styling
+  (logo header, pill tabs, accent buttons).
+- Tabbed wallpaper library, Lively-style: search, favorites (+filter),
+  responsive grid, detail panel (Set / Add to rotation / Delete),
+  double-click to set. Shares the folder and config with the Python app.
+- YouTube downloads in the native app via a standalone yt-dlp sidecar
+  with one-click install/update and one-click ffmpeg setup; playlist
+  picker with queue, progress bar, Cancel.
+- Per-wallpaper volume memory, per-monitor selection, rotation
+  playlist, pause on fullscreen/battery, CLI (`--set/--stop/--mute/
+  --volume`), hide-to-tray on X with taskbar button while open.
+
+## [1.0.23] - 2026-10-06
+
+### Fixed
+- YouTube: ffmpeg is verified to actually execute (blocked binaries
+  fall back to progressive mp4); the merge error maps to a Czech hint.
+- Downloads fail fast with timeouts instead of hanging on throttled
+  networks; new error hints (sign-in, unavailable, timeout).
+
+## [1.0.22] - 2026-10-06
+
+### Added
+- Rotation follows video end (videos play fully, then advance);
+  interval stays for images only.
+- Repeat toggle for rotation (off = stop on the last wallpaper).
+- Play and Skip buttons for the rotation list.
+- Library preview pane: Set / Add to rotation / Delete buttons.
+- Mute checkbox is the master switch (volume memory never unmutes).
+- Download progress bar with percent under the YouTube row; faster
+  failure with Czech messages on throttled networks.
+
+### Fixed
+- Video window state back in `__init__` (was trapped in a handler,
+  broke all playback) + AST regression test.
+
 ## [1.0.21] - 2026-10-05
 
 ### Fixed
@@ -223,7 +370,9 @@ First stable release.
   debug log at `%TEMP%\live_wallpaper_debug.log`.
 - Standalone `WallMotion.exe` (PyInstaller, ~65 MB).
 
-[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.21...HEAD
+[Unreleased]: https://github.com/Jurek1357/WallMotion-PC/compare/v1.0.23...HEAD
+[1.0.23]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.23
+[1.0.22]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.22
 [1.0.21]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.21
 [1.0.20]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.20
 [1.0.19]: https://github.com/Jurek1357/WallMotion-PC/releases/tag/v1.0.19

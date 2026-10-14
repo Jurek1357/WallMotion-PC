@@ -32,7 +32,9 @@ follow-system toggle,
   hide-to-tray on X.
 
 Video playback is built in (libmpv ships next to the exe as
-`libmpv-2.dll` — no mpv install needed). Everything else the native app
+`libmpv-2.dll` — no mpv install needed; it needs the GPU driver
+Vulkan loader present, which any working graphics driver provides).
+Everything else the native app
 downloads itself on first launch (yt-dlp + ffmpeg auto-install, daily
 update checks with one-click install + restart). Prefer the Windows
 installer (`WallMotion-Setup-*.exe`: folder picker, optional media
@@ -179,7 +181,8 @@ ve starších releasích a ve zdrojácích) – nativní přepis v Rustu
   schování do traye křížkem.
 
 Přehrávání videa je vestavěné (libmpv leží vedle exe jako
-`libmpv-2.dll` — žádné mpv se neinstaluje). Vše ostatní si nativní apka stáhne sama na první
+`libmpv-2.dll` — žádné mpv se neinstaluje; stačí funkční grafický
+ovladač s Vulkan loaderem, který má každý). Vše ostatní si nativní apka stáhne sama na první
 kliknutí. Build ze zdrojáků s Rust toolchainem (plus MinGW-w64 nebo
 MSVC):
 

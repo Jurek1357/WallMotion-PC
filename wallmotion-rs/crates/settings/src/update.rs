@@ -19,6 +19,11 @@ pub const RELEASES_API: &str =
     "https://api.github.com/repos/Jurek1357/WallMotion-PC/releases/latest";
 /// Release asset installed by the updater.
 pub const ASSET_NAME: &str = "WallMotion-Settings.exe";
+/// Playback library shipped next to the exe since the libmpv switch
+/// (v1.2.0): fetched only when missing — a loaded DLL cannot be swapped
+/// while the app runs, and the client API is stable across our builds.
+pub const DLL_ASSET_NAME: &str = "libmpv-2.dll";
+pub const DLL_FILE_NAME: &str = "libmpv-2.dll";
 /// Silent auto-checks run at most this often (manual checks anytime).
 pub const CHECK_INTERVAL_SECS: u64 = 24 * 3600;
 
@@ -27,7 +32,12 @@ pub const CHECK_INTERVAL_SECS: u64 = 24 * 3600;
 pub enum UpdateEvent {
     /// Check done: newest tag + download URL (`None` = we are current).
     /// When up to date both carry our own version and no URL.
-    Checked { latest: String, url: Option<String> },
+    /// `dll_url` carries the playback library when the release has one.
+    Checked {
+        latest: String,
+        url: Option<String>,
+        dll_url: Option<String>,
+    },
     /// Download finished and staged (install runs right away).
     Downloaded,
     /// Any failure (network, parse, missing asset, read-only folder).
@@ -74,22 +84,24 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
-/// `(tag_name, asset_url)` from a `releases/latest` JSON body. `None`
-/// on unexpected shape or when our asset is missing from the release.
-pub fn parse_release(body: &str) -> Option<(String, String)> {
+/// `(tag_name, exe_url, dll_url)` from a `releases/latest` JSON body.
+/// `None` on unexpected shape or when our exe asset is missing. The DLL
+/// URL is `None` for pre-libmpv releases (then nothing is fetched).
+pub fn parse_release(body: &str) -> Option<(String, String, Option<String>)> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let tag = v.get("tag_name")?.as_str()?.to_string();
-    let url = v
-        .get("assets")?
-        .as_array()?
-        .iter()
-        .filter_map(|a| {
-            let name = a.get("name")?.as_str()?;
-            let dl = a.get("browser_download_url")?.as_str()?;
-            (name == ASSET_NAME).then(|| dl.to_string())
-        })
-        .next()?;
-    Some((tag, url))
+    let mut exe_url = None;
+    let mut dll_url = None;
+    for a in v.get("assets")?.as_array()? {
+        let name = a.get("name")?.as_str()?;
+        let dl = a.get("browser_download_url")?.as_str()?;
+        if name == ASSET_NAME {
+            exe_url = Some(dl.to_string());
+        } else if name == DLL_ASSET_NAME {
+            dll_url = Some(dl.to_string());
+        }
+    }
+    Some((tag, exe_url?, dll_url))
 }
 
 fn exe_path() -> Result<PathBuf, String> {
@@ -125,6 +137,21 @@ fn backup_path() -> Result<PathBuf, String> {
     Ok(exe_path()?.with_extension("old.exe"))
 }
 
+/// Playback library next to the exe (load-time linked: present =
+/// playable, missing = video shows an error).
+pub fn dll_path() -> Result<PathBuf, String> {
+    let exe = exe_path()?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "unknown exe folder".to_string())?;
+    Ok(dir.join(DLL_FILE_NAME))
+}
+
+/// True when the playback library is absent and must be fetched.
+pub fn dll_missing() -> bool {
+    dll_path().map(|p| !p.is_file()).unwrap_or(true)
+}
+
 /// Remove stale updater leftovers (previous backup / interrupted
 /// download). Best effort, runs once at startup.
 pub fn cleanup_leftovers() {
@@ -133,6 +160,11 @@ pub fn cleanup_leftovers() {
     }
     if let Ok(stage) = stage_path() {
         let _ = std::fs::remove_file(stage);
+    }
+    if let Ok(exe) = exe_path() {
+        if let Some(dir) = exe.parent() {
+            let _ = std::fs::remove_file(dir.join(format!("{DLL_FILE_NAME}.download")));
+        }
     }
 }
 
@@ -148,16 +180,18 @@ pub fn spawn_check(tx: Sender<UpdateEvent>) {
         let body = std::fs::read_to_string(&tmp).unwrap_or_default();
         let _ = std::fs::remove_file(&tmp);
         match parse_release(&body) {
-            Some((tag, url)) if is_newer(current_version(), &tag) => {
+            Some((tag, url, dll_url)) if is_newer(current_version(), &tag) => {
                 let _ = tx.send(UpdateEvent::Checked {
                     latest: tag,
                     url: Some(url),
+                    dll_url,
                 });
             }
-            Some((tag, _)) => {
+            Some((tag, _, _)) => {
                 let _ = tx.send(UpdateEvent::Checked {
                     latest: tag,
                     url: None,
+                    dll_url: None,
                 });
             }
             None => {
@@ -169,8 +203,16 @@ pub fn spawn_check(tx: Sender<UpdateEvent>) {
     });
 }
 
-/// Download `url` into the stage path on a background thread.
-pub fn spawn_download(tx: Sender<UpdateEvent>, url: String) {
+/// Download `url` into the stage path on a background thread. When
+/// `fetch_dll` the playback library comes along too (only ever needed
+/// when missing: straight to its final name via a temp file, since no
+/// locked file is being replaced).
+pub fn spawn_download(
+    tx: Sender<UpdateEvent>,
+    url: String,
+    dll_url: Option<String>,
+    fetch_dll: bool,
+) {
     std::thread::spawn(move || {
         let stage = match stage_path() {
             Ok(p) => p,
@@ -179,14 +221,37 @@ pub fn spawn_download(tx: Sender<UpdateEvent>, url: String) {
                 return;
             }
         };
-        match crate::youtube::fetch_url(&url, &stage) {
-            Ok(()) => {
-                let _ = tx.send(UpdateEvent::Downloaded);
-            }
-            Err(e) => {
+        if let Err(e) = crate::youtube::fetch_url(&url, &stage) {
+            let _ = tx.send(UpdateEvent::Error(e));
+            return;
+        }
+        if fetch_dll {
+            let Some(dll) = dll_url else {
+                let _ = tx.send(UpdateEvent::Error(
+                    "the release has no playback library".to_string(),
+                ));
+                return;
+            };
+            let target = match dll_path() {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = tx.send(UpdateEvent::Error(e));
+                    return;
+                }
+            };
+            let tmp = target.with_file_name(format!("{DLL_FILE_NAME}.download"));
+            if let Err(e) = crate::youtube::fetch_url(&dll, &tmp) {
                 let _ = tx.send(UpdateEvent::Error(e));
+                return;
+            }
+            if let Err(e) = std::fs::rename(&tmp, &target) {
+                let _ = tx.send(UpdateEvent::Error(format!(
+                    "cannot stage the playback library ({e})"
+                )));
+                return;
             }
         }
+        let _ = tx.send(UpdateEvent::Downloaded);
     });
 }
 
@@ -292,7 +357,23 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_release(&body),
-            Some(("v1.1.5".to_string(), "https://x/w.exe".to_string()))
+            Some(("v1.1.5".to_string(), "https://x/w.exe".to_string(), None))
+        );
+        let with_dll = serde_json::json!({
+            "tag_name": "v1.2.0",
+            "assets": [
+                {"name": "WallMotion-Settings.exe", "browser_download_url": "https://x/w.exe"},
+                {"name": "libmpv-2.dll", "browser_download_url": "https://x/m.dll"},
+            ]
+        })
+        .to_string();
+        assert_eq!(
+            parse_release(&with_dll),
+            Some((
+                "v1.2.0".to_string(),
+                "https://x/w.exe".to_string(),
+                Some("https://x/m.dll".to_string())
+            ))
         );
         let missing = serde_json::json!({
             "tag_name": "v1.1.5",

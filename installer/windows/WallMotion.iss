@@ -68,6 +68,8 @@ Name: "pathtools"; Description: "Add tools folder to user PATH"; Flags: unchecke
 
 [Files]
 Source: "..\..\wallmotion-rs\target\release\wallmotion-settings.exe"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion; Components: app
+; In-process playback library (load-time linked: the exe won't start without it).
+Source: "..\..\wallmotion-rs\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: app
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -84,6 +86,7 @@ Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait pos
 ; Only our own leftovers; downloads/ holds the user's videos and stays.
 Type: files; Name: "{app}\{#AppExe}.old.exe"
 Type: files; Name: "{app}\{#AppExe}.update"
+Type: files; Name: "{app}\libmpv-2.dll.download"
 
 [Code]
 { Download + install the checked media tools with PowerShell/tar.exe

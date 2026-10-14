@@ -43,7 +43,7 @@ copyright = "2026, WallMotion contributors"
 license-file = ["../../../LICENSE", "0"]
 section = "graphics"
 priority = "optional"
-depends = "ffmpeg"
+depends = "ffmpeg, libmpv2"
 extended-description = """\
 Video and image wallpapers for your desktop. \
 Settings window with a wallpaper library, YouTube downloads, rotation, \

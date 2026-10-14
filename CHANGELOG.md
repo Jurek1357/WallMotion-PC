@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-14
+
+### Added
+- In-process video playback via libmpv (`wallmotion-mpv` crate):
+  no mpv install needed, `libmpv-2.dll` ships next to the exe
+  (installer includes it; the in-app updater fetches it when missing).
+- Linux `.deb` now depends on `libmpv2` from the distro.
+
+### Changed
+- Playback backend rewritten: end-of-file and first-frame arrive as
+  player events — the sidecar processes, JSON IPC pipes, brightness
+  probe and sync thread are gone.
+- Players are terminated before teardown (a bare drop left the old
+  video playing as a ghost over the new one).
+
+### Removed
+- The `wallmotion-player` mpv sidecar crate and the "mpv not found"
+  message; `mpv` is no longer searched on PATH.
+
 ## [1.1.7] - 2026-10-13
 
 ### Added

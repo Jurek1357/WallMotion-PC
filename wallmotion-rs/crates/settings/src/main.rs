@@ -351,6 +351,7 @@ struct App {
     upd_status: String,
     upd_latest: Option<String>,
     upd_url: Option<String>,
+    upd_dll_url: Option<String>,
     upd_ready: bool,
     upd_auto_done: bool,
     upd_checked_at: u64,
@@ -599,6 +600,7 @@ impl Default for App {
             upd_status: String::new(),
             upd_latest: None,
             upd_url: None,
+            upd_dll_url: None,
             upd_ready: false,
             upd_auto_done: false,
             upd_checked_at: saved.update_checked_at,
@@ -1464,7 +1466,11 @@ impl App {
             .unwrap_or_default();
         for ev in events {
             match ev {
-                update::UpdateEvent::Checked { latest, url } => {
+                update::UpdateEvent::Checked {
+                    latest,
+                    url,
+                    dll_url,
+                } => {
                     self.upd_busy = false;
                     self.upd_rx = None;
                     self.upd_checked_at = update::now_secs();
@@ -1475,10 +1481,12 @@ impl App {
                                 i18n::trf(self.lang, "upd_available", &[("v", &latest)]);
                             self.upd_latest = Some(latest);
                             self.upd_url = Some(u);
+                            self.upd_dll_url = dll_url;
                         }
                         _ => {
                             self.upd_latest = None;
                             self.upd_url = None;
+                            self.upd_dll_url = None;
                             if !self.upd_quiet {
                                 self.upd_status = i18n::tr(self.lang, "upd_current");
                             }
@@ -1575,7 +1583,9 @@ impl App {
                                     self.upd_busy = true;
                                     self.upd_quiet = false;
                                     self.upd_status = i18n::tr(self.lang, "upd_downloading");
-                                    update::spawn_download(tx, url);
+                                    let dll_url = self.upd_dll_url.clone();
+                                    let fetch_dll = update::dll_missing();
+                                    update::spawn_download(tx, url, dll_url, fetch_dll);
                                     ctx.request_repaint();
                                 }
                             }
@@ -1584,6 +1594,7 @@ impl App {
                             {
                                 self.upd_skipped = self.upd_latest.take().unwrap_or_default();
                                 self.upd_url = None;
+                                self.upd_dll_url = None;
                                 self.upd_status.clear();
                                 self.persist();
                             }

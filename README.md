@@ -31,8 +31,8 @@ follow-system toggle,
   pause on fullscreen/battery, CLI (`--set/--stop/--mute/--volume`),
   hide-to-tray on X.
 
-Video wallpapers need `mpv` on PATH (the classic exe brings its own
-decoder; the native one drives mpv). Everything else the native app
+Video playback is built in (libmpv ships next to the exe as
+`libmpv-2.dll` — no mpv install needed). Everything else the native app
 downloads itself on first launch (yt-dlp + ffmpeg auto-install, daily
 update checks with one-click install + restart). Prefer the Windows
 installer (`WallMotion-Setup-*.exe`: folder picker, optional media
@@ -147,7 +147,9 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs vi
 `%TEMP%\live_wallpaper_debug.log`. Planned work: [TODO.md](TODO.md);
 stack analysis and Linux plan: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Released under the [MIT license](LICENSE); the bundled ffmpeg binary keeps
-its own (L)GPL license, and the bundled Hanabi GNOME Shell extension stays
+its own (L)GPL license, the bundled `libmpv-2.dll` stays GPL-2.0+
+([mpv source](https://github.com/mpv-player/mpv)), and the bundled Hanabi
+GNOME Shell extension stays
 GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).
 
 ---
@@ -176,8 +178,8 @@ ve starších releasích a ve zdrojácích) – nativní přepis v Rustu
   pauza na fullscreen/baterii, CLI (`--set/--stop/--mute/--volume`),
   schování do traye křížkem.
 
-Video tapety potřebují `mpv` v PATH (klasické exe má dekodér vlastní;
-nativní řídí mpv). Vše ostatní si nativní apka stáhne sama na první
+Přehrávání videa je vestavěné (libmpv leží vedle exe jako
+`libmpv-2.dll` — žádné mpv se neinstaluje). Vše ostatní si nativní apka stáhne sama na první
 kliknutí. Build ze zdrojáků s Rust toolchainem (plus MinGW-w64 nebo
 MSVC):
 
@@ -288,5 +290,7 @@ Příspěvky vítány — viz [CONTRIBUTING.md](CONTRIBUTING.md). Chyby hlas do
 `%TEMP%\live_wallpaper_debug.log`. Plán práce: [TODO.md](TODO.md);
 analýza stacku a Linux plán: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Kód je pod [licencí MIT](LICENSE); přibalená ffmpeg binárka si nese vlastní
-(L)GPL licenci a přibalené rozšíření Hanabi pro GNOME Shell zůstává pod
+(L)GPL licenci, přibalená `libmpv-2.dll` zůstává pod GPL-2.0+
+([zdrojáky mpv](https://github.com/mpv-player/mpv)) a přibalené rozšíření
+Hanabi pro GNOME Shell zůstává pod
 GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).

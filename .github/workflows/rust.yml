@@ -79,14 +79,15 @@ jobs:
 
       # Test binaries link libmpv: both DLLs must be findable at runtime.
       # (Absolute paths: cargo runs each test with the package dir as cwd,
-      # so relative entries would miss. Vulkan dir is versioned → resolve.)
+      # so relative entries would miss. Vulkan layout varies → resolve.)
       - name: Test (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $vkr = Get-ChildItem 'C:\VulkanSDK\*\runtime' -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          if (!$vkr -or !(Test-Path (Join-Path $vkr.FullName 'vulkan-1.dll'))) { throw 'vulkan-1.dll not found under C:\VulkanSDK' }
-          $env:PATH = "$PWD\deps\mpv-dev;$($vkr.FullName);$env:PATH"
+          $vkdll = Get-ChildItem 'C:\VulkanSDK' -Recurse -Filter 'vulkan-1.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$vkdll) { throw 'vulkan-1.dll not found under C:\VulkanSDK' }
+          Write-Host "vulkan-1.dll: $($vkdll.FullName)"
+          $env:PATH = "$PWD\deps\mpv-dev;$($vkdll.DirectoryName);$env:PATH"
           cargo test --workspace
 
       - name: Test (Linux)

@@ -20,6 +20,7 @@ jobs:
       # from the DLL's exports; shinchiro ships only a MinGW import lib).
       - name: Install mpv dev files
         shell: pwsh
+        working-directory: wallmotion-rs
         run: |
           $ErrorActionPreference = 'Stop'
           curl.exe -L --fail -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z

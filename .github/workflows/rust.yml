@@ -80,13 +80,33 @@ jobs:
       # Test binaries link libmpv: both DLLs must be findable at runtime.
       # (Absolute paths: cargo runs each test with the package dir as cwd,
       # so relative entries would miss. Vulkan layout varies → resolve.)
+      - name: Diagnose DLL resolution (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vkdll = Get-ChildItem 'C:\VulkanSDK' -Recurse -Filter 'vulkan-1.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$vkdll) { throw 'vulkan-1.dll not found under C:\VulkanSDK' }
+          Write-Host "vulkan-1.dll: $($vkdll.FullName)"
+          Write-Host " PWD: $PWD"
+          Write-Host " mpv DLL present: $(Test-Path "$PWD\deps\mpv-dev\libmpv-2.dll")"
+          cargo build --tests -p wallmotion-mpv
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $t = Get-ChildItem 'target\debug\deps\wallmotion_mpv-*.exe' | Select-Object -First 1
+          Write-Host " test binary: $($t.FullName)"
+          & (Join-Path $bindir 'dumpbin.exe') /dependents $t.FullName | Select-String -Pattern '\.dll' | Select-Object -First 15
+          foreach ($d in @('mpv-2.dll', 'vulkan-1.dll')) {
+              $found = (& where.exe $d 2>$null | Select-Object -First 1)
+              Write-Host " where $($d): $($found)"
+          }
+
       - name: Test (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $vkdll = Get-ChildItem 'C:\VulkanSDK' -Recurse -Filter 'vulkan-1.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (!$vkdll) { throw 'vulkan-1.dll not found under C:\VulkanSDK' }
-          Write-Host "vulkan-1.dll: $($vkdll.FullName)"
           $env:PATH = "$PWD\deps\mpv-dev;$($vkdll.DirectoryName);$env:PATH"
           cargo test --workspace
 

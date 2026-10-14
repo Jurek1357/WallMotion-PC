@@ -355,6 +355,8 @@ struct App {
     upd_url: Option<String>,
     upd_dll_url: Option<String>,
     upd_ready: bool,
+    // Windows-only updater bookkeeping (read by windows-gated code).
+    #[allow(dead_code)]
     upd_auto_done: bool,
     upd_checked_at: u64,
     upd_skipped: String,
@@ -382,6 +384,8 @@ struct App {
     preview_path: String,
     preview_tex: Option<egui::TextureHandle>,
     // Windows autostart (Run key) + hidden logon start (`--minimized`).
+    // Read by windows-gated UI only.
+    #[allow(dead_code)]
     autostart: bool,
     start_hidden: bool,
 }
@@ -445,6 +449,8 @@ impl LibType {
 struct MonitorChoice {
     name: String,
     label: String,
+    // Geometry for canvas placement (windows-gated readers only).
+    #[allow(dead_code)]
     rect: Option<(i32, i32, i32, i32)>,
 }
 
@@ -470,6 +476,8 @@ fn monitor_label(
 }
 
 fn discover_monitors(lang: i18n::Lang) -> Vec<MonitorChoice> {
+    // Non-Windows builds list no monitors; keep the param used.
+    let _ = lang;
     #[cfg(windows)]
     {
         wallmotion_win::canvas::sys::list_monitors()

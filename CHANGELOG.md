@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-14
+
+### Fixed
+- Release/CI builds linked the playback library as `mpv-2.dll` while
+  the shipped file is `libmpv-2.dll` — the 1.2.0 exe died at startup
+  with "mpv-2.dll missing". The import name is verified in CI now.
+  (Updating from ≤1.1.7 still needs one manual step: place
+  `libmpv-2.dll` from the release next to the exe, or use the
+  installer — the old updater doesn't know about the DLL yet.)
+
 ## [1.2.0] - 2026-10-14
 
 ### Added

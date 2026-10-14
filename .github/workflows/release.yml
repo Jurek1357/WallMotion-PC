@@ -35,7 +35,9 @@ jobs:
           $exports = $out | Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' | ForEach-Object { $_.Matches.Groups[1].Value } | Where-Object { $_ -like 'mpv_*' } | Sort-Object -Unique
           Write-Host "mpv exports found: $($exports.Count)"
           if ($exports.Count -lt 50) { $out | Select-Object -First 25 | Write-Host; throw 'too few mpv exports parsed' }
-          @('LIBRARY mpv-2', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
+          # NOTE: LIBRARY must be the real file name (libmpv-2.dll):
+          # anything else links an exe that can't find its DLL at startup.
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
           & (Join-Path $bindir 'lib.exe') /def:mpv.def /out:deps/mpv-dev/mpv.lib /machine:x64
           if ($LASTEXITCODE -ne 0) { throw "lib.exe failed: $LASTEXITCODE" }
           $lib = Get-Item 'deps/mpv-dev/mpv.lib'
@@ -45,6 +47,20 @@ jobs:
       - name: Build native settings (release)
         run: cargo build --release -p wallmotion-settings
         working-directory: wallmotion-rs
+
+      # The exe must import libmpv-2.dll (the shipped file name) —
+      # v1.2.0 linked mpv-2.dll and died at startup. Fail fast here.
+      - name: Verify libmpv import name
+        shell: pwsh
+        working-directory: wallmotion-rs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $deps = & (Join-Path $bindir 'dumpbin.exe') /dependents target/release/wallmotion-settings.exe
+          if (!($deps -match '^\s+libmpv-2\.dll\s*$')) { $deps | Write-Host; throw 'exe does not import libmpv-2.dll' }
+          if ($deps -match '^\s+mpv-2\.dll\s*$') { throw 'exe imports bare mpv-2.dll (v1.2.0 bug)' }
+          Write-Host 'import check OK: libmpv-2.dll'
 
       - name: Stage exe + playback library
         run: |

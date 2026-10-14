@@ -55,7 +55,9 @@ jobs:
           $exports = $out | Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' | ForEach-Object { $_.Matches.Groups[1].Value } | Where-Object { $_ -like 'mpv_*' } | Sort-Object -Unique
           Write-Host "mpv exports found: $($exports.Count)"
           if ($exports.Count -lt 50) { $out | Select-Object -First 25 | Write-Host; throw 'too few mpv exports parsed' }
-          @('LIBRARY mpv-2', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
+          # NOTE: LIBRARY must be the real file name (libmpv-2.dll):
+          # anything else links an exe that can't find its DLL at startup.
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
           & (Join-Path $bindir 'lib.exe') /def:mpv.def /out:deps/mpv-dev/mpv.lib /machine:x64
           if ($LASTEXITCODE -ne 0) { throw "lib.exe failed: $LASTEXITCODE" }
           $lib = Get-Item 'deps/mpv-dev/mpv.lib'

@@ -25,11 +25,39 @@ jobs:
         with:
           components: clippy
 
+      # In-process playback links libmpv (see wallmotion-rs/crates/mpv).
+      - name: Install mpv dev files (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libmpv-dev
+
+      # MSVC links mpv.lib: generated from the DLL's exports (shinchiro
+      # ships only a MinGW import lib). Pinned dev package; bump with mpv.
+      - name: Install mpv dev files (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          curl.exe -L --fail -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z
+          7z x mpv-dev.7z -odeps/mpv-dev include libmpv-2.dll libmpv.dll.a -y
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $exports = & "$bindir\dumpbin.exe" /exports deps/mpv-dev/libmpv-2.dll | Select-String '^\s+\d+ [0-9A-F]+ [0-9A-F]+ (\S+)' | ForEach-Object { $_.Matches.Groups[1].Value } | Where-Object { $_ -like 'mpv_*' } | Sort-Object -Unique
+          @('LIBRARY mpv-2', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
+          & "$bindir\lib.exe" /def:mpv.def /out:deps/mpv-dev/mpv.lib /machine:x64 | Select-Object -Last 2
+
       - name: Format check
         run: cargo fmt --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
+      # Test binaries link libmpv: the DLL must be findable at runtime.
+      - name: Test (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:PATH = "deps/mpv-dev;$env:PATH"
+          cargo test --workspace
+
+      - name: Test (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: cargo test --workspace

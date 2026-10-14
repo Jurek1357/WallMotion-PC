@@ -91,6 +91,11 @@ jobs:
               $h = [Win32.K32]::LoadLibrary($d)
               Write-Host "LoadLibrary $d handle=$h err=$([Win32.K32]::GetLastError())"
           }
+          Write-Host "PATH=$env:PATH"
+          $t = Get-ChildItem 'target\debug\deps\wallmotion_mpv-*.exe' | Select-Object -First 1
+          Write-Host "direct run of $($t.FullName) --list:"
+          & $t.FullName --list 2>&1 | Select-Object -First 8
+          Write-Host "direct exit: $LASTEXITCODE"
           cargo test --workspace
 
       - name: Test (Linux)

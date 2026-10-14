@@ -69,13 +69,22 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Test binaries link libmpv-2.dll: it must be findable at runtime.
-      # (Absolute path: cargo runs each test with the package dir as cwd,
-      # so a relative entry would miss. Vulkan ships with the runner image.)
+      # Belt and suspenders: absolute PATH entry (cargo runs each test
+      # with the package dir as cwd, so a relative entry would miss) AND
+      # a copy next to the test binaries (app-dir search wins).
       - name: Test (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $env:PATH = "$PWD\deps\mpv-dev;$env:PATH"
+          cargo build --tests --workspace
+          New-Item -ItemType Directory -Force -Path 'target\debug\deps' | Out-Null
+          Copy-Item "$PWD\deps\mpv-dev\libmpv-2.dll" -Destination 'target\debug\deps\' -Force
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $t = Get-ChildItem 'target\debug\deps\wallmotion_mpv-*.exe' | Select-Object -First 1
+          & (Join-Path $bindir 'dumpbin.exe') /dependents $t.FullName
           cargo test --workspace
 
       - name: Test (Linux)

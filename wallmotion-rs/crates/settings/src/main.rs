@@ -357,6 +357,9 @@ struct App {
     lib_selected: Option<String>,
     lib_sort: LibSort,
     lib_type: LibType,
+    /// Set when the downloads folder was just created: one-time notice
+    /// with its path (session-only, dismissed with OK).
+    lib_folder_notice: Option<PathBuf>,
     // Language + theme (header toggles, same keys as the Python app).
     lang: i18n::Lang,
     theme: theme::AppTheme,
@@ -397,7 +400,7 @@ enum LibSort {
     #[default]
     Name,
     Newest,
-    Biggest,
+    Oldest,
 }
 
 impl LibSort {
@@ -405,7 +408,7 @@ impl LibSort {
         match self {
             LibSort::Name => "sort_name",
             LibSort::Newest => "sort_newest",
-            LibSort::Biggest => "sort_size",
+            LibSort::Oldest => "sort_oldest",
         }
     }
 }
@@ -598,6 +601,7 @@ impl Default for App {
             lib_selected: None,
             lib_sort: LibSort::default(),
             lib_type: LibType::default(),
+            lib_folder_notice: None,
             lang,
             theme,
             follow_system: saved.theme_follow_system,
@@ -1036,6 +1040,13 @@ impl App {
     /// directly; videos need ffmpeg on PATH (else a text badge is shown).
     fn rescan_library(&mut self, ctx: &egui::Context) {
         let dir = library::media_dir();
+        // Fresh install: the folder may not exist yet — create it so the
+        // user (and "Open videos folder") always has somewhere to drop files.
+        let fresh = !dir.is_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        if fresh && dir.is_dir() {
+            self.lib_folder_notice = Some(dir.clone());
+        }
         self.library = library::list_media(&dir);
         self.thumbs.clear();
         let cache = library::thumbs_dir();
@@ -1760,6 +1771,19 @@ impl App {
     /// Library grid (search + cards). Left column in wide mode, top in
     /// narrow mode. Returns the click action, if any.
     fn library_grid(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> Option<LibAction> {
+        // One-time notice: the wallpaper folder was just created.
+        if self.lib_folder_notice.is_some() {
+            let path = self.lib_folder_notice.clone().unwrap_or_default();
+            let full = path.to_string_lossy().into_owned();
+            let msg = i18n::trf(i18n::Lang::En, "lib_folder_created", &[("p", &full)]);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(msg).strong())
+                    .on_hover_text(&full);
+                if ui.small_button("OK").clicked() {
+                    self.lib_folder_notice = None;
+                }
+            });
+        }
         ui.add(
             egui::TextEdit::singleline(&mut self.lib_search)
                 .hint_text(i18n::tr(self.lang, "library_search"))
@@ -1771,7 +1795,7 @@ impl App {
             egui::ComboBox::from_id_salt("lib_sort")
                 .selected_text(i18n::tr(self.lang, self.lib_sort.key()))
                 .show_ui(ui, |ui| {
-                    for mode in [LibSort::Name, LibSort::Newest, LibSort::Biggest] {
+                    for mode in [LibSort::Name, LibSort::Newest, LibSort::Oldest] {
                         ui.selectable_value(
                             &mut self.lib_sort,
                             mode,
@@ -1847,14 +1871,14 @@ impl App {
             .collect();
         match self.lib_sort {
             LibSort::Name => items.sort_by_key(|a| a.name.to_lowercase()),
-            LibSort::Biggest => items.sort_by(|a, b| {
-                b.size
-                    .cmp(&a.size)
-                    .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            }),
             LibSort::Newest => items.sort_by(|a, b| {
                 b.modified
                     .cmp(&a.modified)
+                    .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            }),
+            LibSort::Oldest => items.sort_by(|a, b| {
+                a.modified
+                    .cmp(&b.modified)
                     .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             }),
         }
@@ -2036,23 +2060,40 @@ impl App {
                 self.lib_selected = None;
             }
         }
-        let mut action: Option<LibAction> = None;
-        // Wallpaper-Engine style: grid left, detail panel right.
+        // No selection: grid takes the full width (no empty black panel).
+        // Selection: Wallpaper-Engine style grid left, detail panel right.
         // Narrow windows keep the stacked layout.
-        if ui.available_width() > 560.0 {
-            ui.columns(2, |uis| {
-                action = self.library_grid(&mut uis[0], ctx);
-                if action.is_none() {
-                    action = self.library_detail(&mut uis[1], ctx);
-                }
+        let action: Option<LibAction> = if self.lib_selected.is_none() {
+            self.library_grid(ui, ctx)
+        } else if ui.available_width() > 560.0 {
+            // Grid ~2/3, detail ~1/3 (capped at 340 px) — 50/50
+            // made the detail dominate the window.
+            let total = ui.available_width();
+            let detail_w = (total * 0.34).clamp(240.0, 340.0);
+            let grid_w = (total - detail_w - 8.0).max(200.0);
+            let height = ui.available_height();
+            let mut grid_action = None;
+            let mut detail_action = None;
+            ui.horizontal_top(|ui| {
+                let col_layout = egui::Layout::top_down(egui::Align::Min);
+                ui.allocate_ui_with_layout(egui::vec2(grid_w, height), col_layout, |ui| {
+                    ui.set_width(grid_w);
+                    grid_action = self.library_grid(ui, ctx);
+                });
+                ui.allocate_ui_with_layout(egui::vec2(detail_w, height), col_layout, |ui| {
+                    ui.set_width(detail_w);
+                    detail_action = self.library_detail(ui, ctx);
+                });
             });
+            grid_action.or(detail_action)
         } else {
-            action = self.library_grid(ui, ctx);
+            let mut stacked = self.library_grid(ui, ctx);
             ui.add_space(4.0);
-            if action.is_none() {
-                action = self.library_detail(ui, ctx);
+            if stacked.is_none() {
+                stacked = self.library_detail(ui, ctx);
             }
-        }
+            stacked
+        };
         match action {
             Some(LibAction::Select(name)) => {
                 self.lib_selected = Some(name);

@@ -96,6 +96,20 @@ fn exe_path() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| format!("unknown exe path ({e})"))
 }
 
+/// Shell-facing path: `cmd.exe`/`start` cannot handle verbatim (`\\?\`)
+/// paths and report "cannot find '\\'". Filesystem APIs take the
+/// verbatim form fine, so only convert at shell boundaries.
+fn shell_path(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    s.into_owned()
+}
+
 /// Staged download: `<exe-dir>/<exe-name>.update` next to the binary.
 pub fn stage_path() -> Result<PathBuf, String> {
     let exe = exe_path()?;
@@ -195,15 +209,15 @@ pub fn install_update() -> Result<(), String> {
 
 /// Relaunch the freshly installed exe after a short delay (this process
 /// needs a moment to exit and free the single-instance port), then the
-/// caller quits. No console window pops up.
+/// caller quits. The exe runs quoted directly (no `start`: its title
+/// parsing chokes on some paths). No console window pops up (GUI
+/// subsystem + hidden cmd, which lingers invisibly until the app quits).
 pub fn spawn_restart() -> Result<(), String> {
-    let exe = exe_path()?;
-    let exe = exe.to_string_lossy().into_owned();
+    let exe = shell_path(&exe_path()?);
+    crate::debug_log(&format!("restart cmd: timeout 3 & \"{exe}\""));
     let mut cmd = std::process::Command::new("cmd");
-    cmd.args([
-        "/C", "timeout", "/t", "3", "/nobreak", ">nul", "&", "start", "\"\"", &exe,
-    ])
-    .stdin(std::process::Stdio::null());
+    cmd.args(["/C", "timeout", "/t", "3", "/nobreak", ">nul", "&", &exe])
+        .stdin(std::process::Stdio::null());
     crate::youtube::hide_console(&mut cmd);
     cmd.spawn()
         .map(|_| ())
@@ -293,5 +307,21 @@ mod tests {
     #[test]
     fn current_version_is_semver() {
         assert!(parse_version(current_version()).is_some());
+    }
+
+    #[test]
+    fn shell_path_strips_verbatim() {
+        assert_eq!(
+            shell_path(Path::new(r"\\?\C:\app\w.exe")),
+            r"C:\app\w.exe".to_string()
+        );
+        assert_eq!(
+            shell_path(Path::new(r"\\?\UNC\server\share\w.exe")),
+            r"\\server\share\w.exe".to_string()
+        );
+        assert_eq!(
+            shell_path(Path::new(r"C:\app\w.exe")),
+            r"C:\app\w.exe".to_string()
+        );
     }
 }

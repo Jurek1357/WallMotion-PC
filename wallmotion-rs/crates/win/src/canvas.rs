@@ -308,8 +308,11 @@ pub mod sys {
         place_below(canvas, defview)
     }
 
-    /// True when `canvas` already sits right below the desktop icons
-    /// (same sibling list). Used to log only real reorderings.
+    /// True when `canvas` sits below the desktop icons, allowing
+    /// other WallMotion canvases in between (multi-monitor stack:
+    /// DefView, canvas, canvas, ...). False when an opaque WorkerW
+    /// or anything else covers it, or parents differ.
+    /// Used to log only real reorderings.
     pub fn canvas_below_defview(canvas: isize) -> bool {
         unsafe {
             let defview = match find_defview() {
@@ -320,10 +323,57 @@ pub mod sys {
             if parent != GetParent(HWND(defview as _)).map(|h| h.0 as isize).ok() {
                 return false;
             }
-            GetWindow(HWND(canvas as _), GW_HWNDPREV)
-                .map(|h| h.0 as isize == defview)
-                .unwrap_or(false)
+            // Walk down from DefView: our canvas must appear before
+            // any non-canvas window (WorkerW drift = covered).
+            let mut cur = GetWindow(HWND(defview as _), GW_HWNDNEXT);
+            for _ in 0..32 {
+                let h = match cur {
+                    Ok(h) => h,
+                    Err(_) => return false,
+                };
+                let his = h.0 as isize;
+                if his == 0 {
+                    return false;
+                }
+                if his == canvas {
+                    return true;
+                }
+                let mut cls = [0u16; 64];
+                let len = GetClassNameW(h, &mut cls) as usize;
+                let name = String::from_utf16_lossy(&cls[..len.min(64)]);
+                if name == "WallMotionCanvas" {
+                    cur = GetWindow(h, GW_HWNDNEXT);
+                    continue;
+                }
+                // WorkerW or anything else above our canvas = covered.
+                return false;
+            }
+            false
         }
+    }
+
+    /// Pin a whole stack below the icons in order:
+    /// first below DefView, each next below the previous.
+    /// Fixes multi-monitor ping-pong where every canvas fought
+    /// for the single slot directly below DefView. Best effort.
+    pub fn ensure_canvases_stacked(canvases: &[isize]) -> bool {
+        if canvases.is_empty() {
+            return true;
+        }
+        let defview = match find_defview() {
+            Some(d) => d,
+            None => return false,
+        };
+        let mut prev = defview;
+        let mut ok = true;
+        for &c in canvases {
+            if c == 0 {
+                continue;
+            }
+            ok &= place_below(c, prev);
+            prev = c;
+        }
+        ok
     }
 
     /// Move `other` right below the canvas (used for WorkerW once).

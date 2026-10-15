@@ -46,6 +46,11 @@ impl Player {
         let mpv = Mpv::with_initializer(|init| {
             init.set_property("wid", wid as i64)?;
             init.set_property("vo", "gpu")?;
+            init.set_property("hwdec", "auto-safe")?;
+            // Keep the last frame on screen after EOF: the rotation
+            // switch then swaps from a frozen picture, never from a
+            // black/transparent canvas (original wallpaper flash).
+            init.set_property("keep-open", "yes")?;
             init.set_property("pause", true)?;
             init.set_property("osc", false)?;
             init.set_property("input-default-bindings", false)?;

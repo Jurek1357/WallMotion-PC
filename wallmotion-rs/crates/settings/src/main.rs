@@ -2486,10 +2486,11 @@ impl App {
             // ghost (old picture stays, both audios play).
             old.player.terminate();
             drop(old);
-            // Black baseline: the sync release below must fire on the NEW
-            // first frames, never on a reused stale picture.
-            #[cfg(windows)]
-            wallmotion_win::canvas::sys::clear_canvas(canvas);
+            // No black clear here: on Win11 layered canvases GDI paint
+            // doesn't stick and the canvas goes transparent (original
+            // wallpaper flash). The old last frame (keep-open=yes)
+            // stays as baseline; the sync release below fires on the
+            // NEW PlaybackRestart event, never on stale pixels.
             stages.push((canvas, rect));
         }
         let mut fresh: Vec<RunningVideo> = vec![];
@@ -2854,21 +2855,28 @@ impl eframe::App for App {
         // Z-order watchdog: opaque WorkerW backgrounds drift above our
         // canvases (video vanishes, audio plays on). Re-pin below icons,
         // logging only real reorderings (plus a playback poll line).
-        if self.any_running() && self.last_zcheck.elapsed() >= std::time::Duration::from_secs(2) {
+        // 500 ms: a drift then flashes the original wallpaper only
+        // briefly instead of up to 2 s. Cheap (a few Win32 calls).
+        if self.any_running() && self.last_zcheck.elapsed() >= std::time::Duration::from_millis(500)
+        {
             self.last_zcheck = std::time::Instant::now();
             #[cfg(windows)]
             {
                 use wallmotion_win::canvas::sys as canvas;
+                // Stack all canvases (primary + extra monitors) below
+                // the icons in order. Per-canvas "right below DefView"
+                // pinning made dual-monitor canvases fight each other
+                // (each swap flashed the original wallpaper).
+                let mut all: Vec<isize> = Vec::new();
                 if let Some(run) = &self.running {
-                    if !canvas::canvas_below_defview(run.canvas) {
-                        debug_log(&format!("zfix tree: {}", canvas::debug_desktop_tree()));
-                        canvas::ensure_below_defview(run.canvas);
-                    }
+                    all.push(run.canvas);
                 }
                 for run in &self.extra {
-                    if !canvas::canvas_below_defview(run.canvas) {
-                        canvas::ensure_below_defview(run.canvas);
-                    }
+                    all.push(run.canvas);
+                }
+                if all.iter().any(|&c| !canvas::canvas_below_defview(c)) {
+                    debug_log(&format!("zfix tree: {}", canvas::debug_desktop_tree()));
+                    canvas::ensure_canvases_stacked(&all);
                 }
             }
             playback_poll_log(&self.file);

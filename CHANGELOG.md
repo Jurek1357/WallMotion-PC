@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-15
+
+### Fixed
+- Wallpaper flickering to the original wallpaper on multi-monitor
+  setups: every canvas fought for the single slot right below the
+  desktop icons (z-order watchdog re-pinned every 2 s). Canvases now
+  stack in order below the icons and the watchdog runs every 500 ms.
+- Flicker on video switch/loop: the canvas was cleared to black with
+  GDI, which doesn't stick on Win11 layered canvases (transparent →
+  original wallpaper flashed). The previous frame now stays until the
+  new first frame arrives; mpv keeps the last frame open (`keep-open`)
+  and uses hardware decoding (`hwdec=auto-safe`).
+
 ## [1.2.1] - 2026-10-14
 
 ### Fixed

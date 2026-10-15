@@ -4452,11 +4452,11 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-core"
-version = "1.2.1"
+version = "1.2.2"
 
 [[package]]
 name = "wallmotion-demo"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "embed-manifest",
  "wallmotion-mpv",
@@ -4466,14 +4466,14 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-mpv"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "libmpv2",
 ]
 
 [[package]]
 name = "wallmotion-settings"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "eframe",
  "egui",
@@ -4492,7 +4492,7 @@ dependencies = [
 
 [[package]]
 name = "wallmotion-win"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "image",
  "wallmotion-core",

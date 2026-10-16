@@ -93,6 +93,10 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
                 "yt_av1_soft",
                 "No AV1 decoder found — download works, playback may stutter.",
             ),
+            (
+                "rotation_gif_warn",
+                "Note: GIFs have no end — rotation may stall on one.",
+            ),
             ("refresh", "Refresh"),
             ("mute_short", "Mute"),
             ("browse", "Browse…"),
@@ -199,6 +203,10 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             (
                 "yt_av1_soft",
                 "AV1 dekodér nenalezen — stahování funguje, přehrávání může sekat.",
+            ),
+            (
+                "rotation_gif_warn",
+                "Pozor: GIF nemá konec — rotace na něm může viset.",
             ),
             ("refresh", "Obnovit"),
             ("mute_short", "Ztlumit"),

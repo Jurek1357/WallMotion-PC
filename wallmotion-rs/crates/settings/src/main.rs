@@ -1500,6 +1500,18 @@ impl App {
                         ))
                         .strong(),
                     );
+                    // GIFs have no timeline: mpv may loop one forever
+                    // without an end signal, stalling the rotation on it.
+                    if self
+                        .rotation
+                        .files()
+                        .iter()
+                        .any(|f| f.to_lowercase().ends_with(".gif"))
+                    {
+                        ui.label(
+                            egui::RichText::new(i18n::tr(self.lang, "rotation_gif_warn")).weak(),
+                        );
+                    }
                 });
         }); // rotation card
         ui.add_space(8.0);
@@ -3307,9 +3319,9 @@ fn display_file_name(path: &str) -> String {
 
 /// Image extensions handled by the static-wallpaper path (shared by
 /// `set_wallpaper` and the rotation dwell check so both agree on what
-/// "ends" and what just sits).
+/// "ends" and what just sits). GIF is video now: mpv plays it animated.
 fn is_image_path(path: &str) -> bool {
-    const IMAGES: [&str; 5] = ["jpg", "jpeg", "png", "bmp", "gif"];
+    const IMAGES: [&str; 4] = ["jpg", "jpeg", "png", "bmp"];
     PathBuf::from(path.trim())
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())

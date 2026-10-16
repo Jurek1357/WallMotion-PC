@@ -94,7 +94,7 @@ Type: files; Name: "{app}\libmpv-2.dll.download"
 [Code]
 { Download + install the checked media tools with PowerShell/tar.exe
   (both ship Windows 10+): no Inno plugins needed. Already-present
-  tools are skipped ({app}\tools, then PATH) so reinstalls and
+  tools are skipped (app tools dir, then PATH) so reinstalls and
   system-wide copies never download twice. Failures only warn —
   the app auto-installs missing tools on first launch anyway. }
 procedure FetchTools();

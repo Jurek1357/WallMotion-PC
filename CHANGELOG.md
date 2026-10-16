@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-10-16
+
+### Fixed
+- Windows installer no longer re-downloads yt-dlp/ffmpeg when
+  already present (`{app}\tools` first, then user/system PATH —
+  the app finds both, so a second copy only wasted bandwidth).
+
 ## [1.2.4] - 2026-10-16
 
 ### Added

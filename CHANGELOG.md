@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-10-16
+
+### Added
+- Animated GIF wallpapers: GIFs play through mpv (looped single,
+  rotation-aware) instead of freezing on the first frame. The
+  rotation card warns when the playlist holds a GIF (no timeline —
+  rotation may stall on one).
+- Explorer right-click "Set as wallpaper (WallMotion)" for video /
+  image files (installer registers per-extension verbs, removed on
+  uninstall; double-click keeps the user's own defaults).
+
 ## [1.2.5] - 2026-10-16
 
 ### Fixed

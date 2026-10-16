@@ -355,6 +355,11 @@ struct App {
     ytdlp_path: Option<std::path::PathBuf>,
     ytdlp_ver: Option<String>,
     ffmpeg_path: Option<std::path::PathBuf>,
+    /// AV1 decoder in the provisioned ffmpeg (`None` = unknown:
+    /// ffmpeg missing or won't run). Decided in `rescan_tools`.
+    ffmpeg_av1: Option<bool>,
+    /// YouTube download codec preference (persisted as `yt_codec`).
+    yt_codec: wallmotion_core::youtube::VideoCodec,
     // Background tool auto-install (own channel so it never blocks
     // downloads; started once on launch when a sidecar is missing).
     tool_rx: Option<std::sync::mpsc::Receiver<youtube::YtEvent>>,
@@ -619,6 +624,8 @@ impl Default for App {
             ytdlp_path: None,
             ytdlp_ver: None,
             ffmpeg_path: None,
+            ffmpeg_av1: None,
+            yt_codec: wallmotion_core::youtube::VideoCodec::from_code(&saved.yt_codec),
             tool_rx: None,
             tool_busy: false,
             tools_auto_started: false,
@@ -754,6 +761,7 @@ impl App {
             theme_follow_system: self.follow_system,
             update_checked_at: self.upd_checked_at,
             update_skipped: self.upd_skipped.clone(),
+            yt_codec: self.yt_codec.code().to_string(),
         }
         .save();
     }
@@ -808,6 +816,12 @@ impl App {
         self.ytdlp_path = youtube::find_ytdlp();
         self.ytdlp_ver = self.ytdlp_path.as_deref().and_then(youtube::ytdlp_version);
         self.ffmpeg_path = youtube::find_ffmpeg();
+        // AV1 decode check is one `ffmpeg -decoders` run (~50 ms);
+        // cached until the next rescan (install/update changes it).
+        self.ffmpeg_av1 = self
+            .ffmpeg_path
+            .as_deref()
+            .and_then(youtube::ffmpeg_supports_av1);
         self.yt_tools_scanned = true;
     }
 
@@ -854,6 +868,7 @@ impl App {
                 url,
                 library::media_dir(),
                 self.ffmpeg_path.clone(),
+                self.yt_codec,
                 self.yt_child.clone(),
                 self.yt_cancel.clone(),
                 tx,
@@ -906,6 +921,7 @@ impl App {
             url,
             library::media_dir(),
             self.ffmpeg_path.clone(),
+            self.yt_codec,
             self.yt_child.clone(),
             self.yt_cancel.clone(),
             tx,
@@ -1748,6 +1764,41 @@ impl App {
             )
             .lost_focus()
             && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(4.0);
+        // Download codec: H.264 everywhere, AV1 = smaller files but
+        // heavier decode. Warn when ffmpeg has no AV1 decoder.
+        ui.horizontal_wrapped(|ui| {
+            ui.label(i18n::tr(self.lang, "yt_codec"));
+            let mut codec = self.yt_codec;
+            egui::ComboBox::from_id_salt("yt_codec")
+                .selected_text(i18n::tr(
+                    self.lang,
+                    match codec {
+                        wallmotion_core::youtube::VideoCodec::Av1 => "yt_codec_av1",
+                        wallmotion_core::youtube::VideoCodec::H264 => "yt_codec_h264",
+                    },
+                ))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut codec,
+                        wallmotion_core::youtube::VideoCodec::H264,
+                        i18n::tr(self.lang, "yt_codec_h264"),
+                    );
+                    ui.selectable_value(
+                        &mut codec,
+                        wallmotion_core::youtube::VideoCodec::Av1,
+                        i18n::tr(self.lang, "yt_codec_av1"),
+                    );
+                });
+            if codec != self.yt_codec {
+                self.yt_codec = codec;
+                self.persist();
+            }
+            if codec == wallmotion_core::youtube::VideoCodec::Av1 && self.ffmpeg_av1 == Some(false)
+            {
+                ui.label(egui::RichText::new(i18n::tr(self.lang, "yt_av1_soft")).weak());
+            }
+        });
         ui.add_space(4.0);
         if self.yt_busy {
             if ui

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-10-16
+
+### Added
+- YouTube download codec choice: H.264 (plays everywhere, default)
+  or AV1 (~half the file size at the same quality). AV1 falls back
+  to H.264 when a video has no AV1 renditions. The app checks
+  `ffmpeg -decoders` once at startup and warns when no AV1 decoder
+  is found (download still works, playback may stutter on older
+  machines without hardware AV1 decode).
+
 ## [1.2.3] - 2026-10-16
 
 ### Added

@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          curl.exe -L --fail -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z
+          curl.exe -L --fail --retry 5 --retry-delay 15 --retry-all-errors -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z
           7z x mpv-dev.7z -odeps/mpv-dev include libmpv-2.dll libmpv.dll.a -y
           if (!(Test-Path 'deps/mpv-dev/libmpv-2.dll')) { throw 'DLL missing after extract' }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath

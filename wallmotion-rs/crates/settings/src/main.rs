@@ -2445,6 +2445,9 @@ impl App {
     /// touching the current playback. The caller adopts the runner, or
     /// destroys a freshly built canvas on failure. Err = localized
     /// status text.
+    /// Windows-only callers (other platforms report `no_canvas`
+    /// without spawning): silence the Linux dead-code lint.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn launch_video(
         &mut self,
         canvas: isize,
@@ -2778,6 +2781,8 @@ impl App {
     /// releases them together once every canvas painted (or the 3 s
     /// deadline). Honors a pause the user hits meanwhile (captured
     /// here, same as the old probe thread did).
+    /// Windows-only caller (same reason as `launch_video`).
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn arm_sync(&mut self) {
         for run in self.running.iter_mut().chain(self.extra.iter_mut()) {
             run.painted = false;

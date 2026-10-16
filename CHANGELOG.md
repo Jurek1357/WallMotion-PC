@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-10-16
+
+### Added
+- Seamless video switching: the next video pre-rolls on hidden
+  canvases while the old one keeps playing, then swaps on the first
+  frame — rotation advances without a gap. A failed pre-roll keeps
+  the old video instead of going dark.
+
+### Fixed
+- Playlist freezing on video end: a lost mpv EndOfFile event left
+  rotation waiting forever (keep-open idle on the last frame). The
+  `eof-reached` property is now the fallback signal, and `loop-file`
+  is set before `loadfile` so single videos loop reliably.
+- Rotation cursor drift: manual picks no longer leave the cursor at
+  the end of the list (rotation snaps to the playing file when
+  enabled, so it continues after it instead of stopping at once).
+- Autopause misfires: the maximized Settings window counted as a
+  fullscreen app and paused the wallpaper ~2 s after every Play.
+  Own-process windows are ignored now, and turning a rule off resumes
+  an already-frozen player at once.
+
 ## [1.2.2] - 2026-10-15
 
 ### Fixed

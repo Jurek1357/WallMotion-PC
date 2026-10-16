@@ -63,13 +63,16 @@ impl Player {
     /// Replace the current file (mirror of `--loop-file=no` rotation mode:
     /// the file plays once, [`LibEvent::EndOfFile`] fires at the end).
     pub fn load_file(&self, file: &Path, loop_file: bool) -> Result<(), String> {
+        // Loop mode first: it must be in place before the file starts,
+        // otherwise a short clip can reach EOF unlooped (single video
+        // then freezes on its last frame instead of looping).
+        self.mpv
+            .set_property("loop-file", if loop_file { "inf" } else { "no" })
+            .map_err(|e| format!("loop-file: {e:?}"))?;
         let path = file.to_string_lossy().into_owned();
         self.mpv
             .command("loadfile", &[path.as_str(), "replace"])
             .map_err(|e| format!("loadfile: {e:?}"))?;
-        self.mpv
-            .set_property("loop-file", if loop_file { "inf" } else { "no" })
-            .map_err(|e| format!("loop-file: {e:?}"))?;
         Ok(())
     }
 
@@ -97,6 +100,10 @@ impl Player {
     }
 
     pub fn prop_str(&self, name: &str) -> Option<String> {
+        self.mpv.get_property(name).ok()
+    }
+
+    pub fn prop_f64(&self, name: &str) -> Option<f64> {
         self.mpv.get_property(name).ok()
     }
 

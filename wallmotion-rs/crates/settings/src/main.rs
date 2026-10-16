@@ -66,8 +66,10 @@ fn heartbeat() {
 }
 
 /// Playback poll (max one line per 30 s): proves the UI loop still
-/// pumps player events while the window is hidden.
-fn playback_poll_log(file: &str) {
+/// pumps player events while the window is hidden. Includes the mpv
+/// `pause` flag + `time-pos` so a frozen picture is diagnosable
+/// (paused=true vs. stuck-while-playing vs. EOF missed).
+fn playback_poll_log(file: &str, paused: Option<bool>, pos: Option<f64>, eof_set: Option<bool>) {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -75,7 +77,12 @@ fn playback_poll_log(file: &str) {
         .unwrap_or(0);
     if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::SeqCst)) >= 30 {
         LAST.store(now, std::sync::atomic::Ordering::SeqCst);
-        debug_log(&format!("playback poll file={file}"));
+        let paused = paused.map_or("?".to_string(), |p| p.to_string());
+        let pos = pos.map_or("?".to_string(), |p| format!("{p:.1}"));
+        let eof = eof_set.map_or("?".to_string(), |e| e.to_string());
+        debug_log(&format!(
+            "playback poll file={file} paused={paused} pos={pos} eof={eof}"
+        ));
     }
 }
 
@@ -296,6 +303,14 @@ struct App {
     /// Extra runners for the other monitors (same video everywhere,
     /// muted except the first). Empty unless multi-monitor is active.
     extra: Vec<RunningVideo>,
+    /// Prerolled successors on hidden canvases (double-buffered
+    /// switch: the new video warms up while the old one keeps
+    /// playing, then they swap on first frame — no gap).
+    /// Drained by `commit_preroll`, reaped by `stop_video`.
+    pending: Vec<RunningVideo>,
+    /// Swap deadline for `pending` (first-frame sync, 3 s like
+    /// `arm_sync`): swap even if some canvas never painted.
+    pending_deadline: Option<std::time::Instant>,
     /// First-frame sync: runners start frozen, release together once
     /// every canvas painted (or the deadline passes).
     sync_waiting: bool,
@@ -572,6 +587,8 @@ impl Default for App {
             pause_on_battery: saved.pause_on_battery,
             last_poll: std::time::Instant::now(),
             last_zcheck: std::time::Instant::now(),
+            pending: vec![],
+            pending_deadline: None,
             remote_rx: None,
             pending_start: false,
             rotation_enabled: saved.rotation.enabled,
@@ -1106,7 +1123,12 @@ impl App {
     /// skew, the event itself is the signal — no brightness probe.
     fn poll_player_events(&mut self) {
         use wallmotion_mpv::LibEvent;
-        for run in self.running.iter_mut().chain(self.extra.iter_mut()) {
+        for run in self
+            .running
+            .iter_mut()
+            .chain(self.extra.iter_mut())
+            .chain(self.pending.iter_mut())
+        {
             loop {
                 match run.player.wait_event(0) {
                     Some(LibEvent::PlaybackRestart) => run.painted = true,
@@ -1114,16 +1136,29 @@ impl App {
                     Some(LibEvent::EndOfFile) => {
                         if run.eof.is_none() {
                             run.eof = Some(true);
+                            debug_log("mpv event: EndOfFile");
                         }
                     }
                     Some(LibEvent::FileError) => {
                         if run.eof.is_none() {
                             run.eof = Some(false);
+                            debug_log("mpv event: FileError");
                         }
                     }
                     Some(LibEvent::Shutdown) => {}
                     None => break,
                 }
+            }
+        }
+        // Event fallback: with keep-open the player idles on the last
+        // frame after EOF; if the EndFile event got lost, `eof-reached`
+        // stays true while `eof` is still None and rotation would freeze
+        // forever. Property is ground truth — adopt it (live runners
+        // only, never the hidden warmups).
+        for run in self.running.iter_mut().chain(self.extra.iter_mut()) {
+            if run.eof.is_none() && run.player.prop_bool("eof-reached") == Some(true) {
+                run.eof = Some(true);
+                debug_log("mpv eof-reached property fallback");
             }
         }
         if self.sync_waiting {
@@ -1345,6 +1380,7 @@ impl App {
                         {
                             self.auto
                                 .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.refresh_autopause_after_rule_change();
                             self.persist();
                         }
                         if ui
@@ -1356,6 +1392,7 @@ impl App {
                         {
                             self.auto
                                 .set_rules(self.pause_on_fullscreen, self.pause_on_battery);
+                            self.refresh_autopause_after_rule_change();
                             self.persist();
                         }
                     });
@@ -1375,6 +1412,15 @@ impl App {
                             .changed()
                         {
                             self.last_rotation = std::time::Instant::now();
+                            if self.rotation_enabled {
+                                // Continue after the currently playing
+                                // file: manual picks don't move the
+                                // cursor, so it may sit at the end (with
+                                // repeat off rotation would then stop at
+                                // the first EOF instead of advancing).
+                                let cur = self.file.trim().to_string();
+                                self.rotation.snap_to(&cur);
+                            }
                             // The mpv loop flag is chosen at spawn: re-spawn
                             // a running video so the new mode applies
                             // (looped single vs. advancing playlist).
@@ -2210,6 +2256,8 @@ impl App {
         for run in self.extra.drain(..) {
             reap_runner(run);
         }
+        // An in-flight preroll dies with the video (player + canvas).
+        self.drop_pending();
         self.paused = false;
         self.auto_paused = false;
         self.auto.reset();
@@ -2237,6 +2285,39 @@ impl App {
         };
     }
 
+    /// After the user flips an autopause rule: resume at once when no
+    /// enabled rule fires anymore. `set_rules(false, false)` clears the
+    /// state machine, but the already-paused mpv stays frozen without
+    /// this (looks like "video stopped even after I turned the rule
+    /// off"). Never overrides the manual Pause button.
+    fn refresh_autopause_after_rule_change(&mut self) {
+        if self.paused || !self.any_running() {
+            return;
+        }
+        let want = wallmotion_core::autopause::should_pause(
+            poll_fullscreen(),
+            poll_battery(),
+            self.pause_on_fullscreen,
+            self.pause_on_battery,
+        );
+        if !want && self.auto_paused {
+            self.auto_paused = false;
+            if let Some(run) = &self.running {
+                let _ = run.player.set_paused(false);
+            }
+            for run in &self.extra {
+                let _ = run.player.set_paused(false);
+            }
+            // Pending warmups were spawned with the old paused state;
+            // make sure the swap doesn't re-freeze them.
+            for run in &self.pending {
+                let _ = run.player.set_paused(false);
+            }
+            self.status = i18n::tr(self.lang, "status_playing");
+            debug_log("autopause off (rule disabled) -> resume");
+        }
+    }
+
     /// One autopause poll (throttled by the caller). Never overrides the
     /// manual Pause button; pauses at once, resumes after 2 clean polls.
     fn autopause_tick(&mut self) {
@@ -2247,6 +2328,9 @@ impl App {
         let battery = poll_battery();
         match self.auto.tick(fullscreen, battery, self.paused) {
             Some(true) => {
+                debug_log(&format!(
+                    "autopause on fullscreen={fullscreen} battery={battery}"
+                ));
                 self.auto_paused = true;
                 if let Some(run) = &self.running {
                     let _ = run.player.set_paused(true);
@@ -2257,6 +2341,9 @@ impl App {
                 self.status = i18n::tr(self.lang, "status_autopaused");
             }
             Some(false) => {
+                debug_log(&format!(
+                    "autopause off fullscreen={fullscreen} battery={battery}"
+                ));
                 self.auto_paused = false;
                 if let Some(run) = &self.running {
                     let _ = run.player.set_paused(false);
@@ -2434,96 +2521,176 @@ impl App {
         vec![(x, y, w, h)]
     }
 
-    /// Seamless-ish switch reusing each monitor's canvas: no new
-    /// windows, no teardown flash. Predecessors are dropped FIRST (two
-    /// renderers on one HWND freeze); frozen last frames bridge the
-    /// startups. A stale layout falls back to a full rebuild.
+    /// Seamless switch: the successor warms up on fresh hidden
+    /// canvases while the old video keeps playing, then they swap on
+    /// the first frame (see `begin_preroll`/`commit_preroll`). A stale
+    /// layout falls back to a full rebuild.
     fn switch_video(&mut self, path: PathBuf) {
-        let old_primary = self.running.take();
-        let mut old_extra: Vec<RunningVideo> = std::mem::take(&mut self.extra);
-        if old_primary.is_none() && old_extra.is_empty() {
+        if !self.any_running() {
             self.set_video(path);
             return;
         }
-        // Reuse iff the monitor layout is unchanged (same rects, same order).
+        // Preroll iff the monitor layout is unchanged (same rects, same
+        // order); the old runners stay put until the swap.
         #[cfg(windows)]
         let reuse = {
             let mut olds: Vec<(i32, i32, i32, i32)> = vec![];
-            if let Some(ref run) = old_primary {
+            if let Some(ref run) = self.running {
                 olds.push(run.rect);
             }
-            olds.extend(old_extra.iter().map(|r| r.rect));
+            olds.extend(self.extra.iter().map(|r| r.rect));
             olds == self.target_rects()
         };
         #[cfg(not(windows))]
         let reuse = false;
         if !reuse {
-            if let Some(run) = old_primary {
+            if let Some(run) = self.running.take() {
                 reap_runner(run);
             }
-            for run in old_extra.drain(..) {
+            for run in self.extra.drain(..) {
                 reap_runner(run);
             }
+            self.drop_pending();
             self.set_video(path);
             return;
         }
         debug_log(&format!("switch {}", path.display()));
-        let mut olds: Vec<RunningVideo> = vec![];
-        if let Some(run) = old_primary {
-            olds.push(run);
-        }
-        olds.append(&mut old_extra);
-        // Reap ALL predecessors first, then spawn ALL successors
-        // back-to-back so every monitor warms up in parallel.
-        let mut stages: Vec<(isize, (i32, i32, i32, i32))> = vec![];
-        for old in olds {
+        // Double-buffered: the successor warms up on hidden canvases
+        // while the old video keeps playing; the swap happens on the
+        // first frame (see `commit_preroll`), so there is no gap.
+        #[cfg(windows)]
+        self.begin_preroll(path);
+        #[cfg(not(windows))]
+        let _ = path;
+    }
+
+    /// Drop uncommitted preroll runners (player + canvas each).
+    /// Best effort, never panics.
+    fn drop_pending(&mut self) {
+        for run in self.pending.drain(..) {
+            run.player.terminate();
             #[cfg(windows)]
-            let rect = old.rect;
+            wallmotion_win::canvas::sys::destroy_canvas(run.canvas);
             #[cfg(not(windows))]
-            let rect = (0, 0, 1, 1);
-            let canvas = old.canvas;
-            // Terminate first: a bare drop leaves the core playing as a
-            // ghost (old picture stays, both audios play).
-            old.player.terminate();
-            drop(old);
-            // No black clear here: on Win11 layered canvases GDI paint
-            // doesn't stick and the canvas goes transparent (original
-            // wallpaper flash). The old last frame (keep-open=yes)
-            // stays as baseline; the sync release below fires on the
-            // NEW PlaybackRestart event, never on stale pixels.
-            stages.push((canvas, rect));
+            let _ = run.canvas;
         }
-        let mut fresh: Vec<RunningVideo> = vec![];
-        let mut failed: Option<String> = None;
-        for (i, (canvas, rect)) in stages.into_iter().enumerate() {
+        self.pending_deadline = None;
+    }
+
+    /// Start the successor video on fresh hidden canvases (one per
+    /// monitor rect). Old runners keep playing until `commit_preroll`.
+    /// Replaces any in-flight preroll; falls back to keeping the old
+    /// video when nothing could start. Windows only (other platforms
+    /// never reach here — `reuse` is false there).
+    #[cfg(windows)]
+    fn begin_preroll(&mut self, path: PathBuf) {
+        use wallmotion_win::canvas::sys as canvas;
+        self.drop_pending();
+        // The predecessor just hit EOF (rotation) but stays in `running`
+        // until the swap: clear its stale mark so `rotation_tick` doesn't
+        // advance twice while the successor is still warming up.
+        if let Some(run) = &mut self.running {
+            run.eof = None;
+        }
+        for run in &mut self.extra {
+            run.eof = None;
+        }
+        let mut started: Vec<RunningVideo> = vec![];
+        for (i, (x, y, w, h)) in self.target_rects().into_iter().enumerate() {
+            let wc = match canvas::setup_wallpaper_canvas(x, y, w, h) {
+                Some(wc) => wc,
+                None => continue,
+            };
+            // Hidden warmup: mpv keeps decoding into a hidden canvas,
+            // so the first frame is ready before the swap.
+            canvas::set_canvas_visible(wc.canvas, false);
             let audible = i == 0;
-            match self.launch_video(canvas, rect, &path, self.muted || !audible, audible) {
-                Ok(run) => fresh.push(run),
+            match self.launch_video(
+                wc.canvas,
+                (x, y, w, h),
+                &path,
+                self.muted || !audible,
+                audible,
+            ) {
+                Ok(run) => started.push(run),
                 Err(msg) => {
-                    failed = Some(msg);
+                    canvas::destroy_canvas(wc.canvas);
+                    self.status = msg;
                 }
             }
         }
-        if fresh.is_empty() {
-            if let Some(msg) = failed {
-                self.status = msg;
-            }
+        if started.is_empty() {
+            debug_log("preroll: no monitor could start, keeping old video");
             return;
         }
+        // setup_wallpaper_canvas pins WorkerW right below each fresh
+        // canvas, which covers the still-playing old canvases until the
+        // swap (opaque WorkerW = original wallpaper on screen). Re-stack
+        // at once: old (visible) on top, warmups hidden beneath.
+        let mut stack: Vec<isize> = vec![];
+        if let Some(run) = &self.running {
+            stack.push(run.canvas);
+        }
+        for run in &self.extra {
+            stack.push(run.canvas);
+        }
+        for run in &started {
+            stack.push(run.canvas);
+        }
+        canvas::ensure_canvases_stacked(&stack);
+        debug_log(&format!("preroll {} canvas(es)", started.len()));
+        self.pending = started;
+        self.pending_deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    }
+
+    /// Swap prerolled runners in: show the warmed-up canvases stacked
+    /// below the icons, then reap the predecessors. Called once every
+    /// canvas painted (or on the 3 s deadline — same contract as the
+    /// first-frame sync). Windows only.
+    #[cfg(windows)]
+    fn commit_preroll(&mut self) {
+        use wallmotion_win::canvas::sys as canvas;
+        if self.pending.is_empty() {
+            return;
+        }
+        let fresh: Vec<RunningVideo> = std::mem::take(&mut self.pending);
+        self.pending_deadline = None;
+        if fresh.iter().all(|run| !run.painted) {
+            debug_log("swap go painted=false");
+        }
+        let canvases: Vec<isize> = fresh.iter().map(|run| run.canvas).collect();
+        for &c in &canvases {
+            canvas::set_canvas_visible(c, true);
+        }
+        canvas::ensure_canvases_stacked(&canvases);
+        if let Some(run) = self.running.take() {
+            reap_runner(run);
+        }
+        for run in self.extra.drain(..) {
+            reap_runner(run);
+        }
+        let effective_pause = self.paused || self.auto_paused;
         let mut it = fresh.into_iter();
         self.running = it.next();
         self.extra = it.collect();
-        self.paused = false;
-        self.auto_paused = false;
-        self.auto.reset();
-        #[cfg(windows)]
-        {
-            self.status = self.video_status();
+        if let Some(run) = &self.running {
+            let _ = run.player.set_paused(effective_pause);
         }
-        if failed.is_some() {
-            debug_log("switch: some monitors failed to start");
+        for run in &self.extra {
+            let _ = run.player.set_paused(effective_pause);
         }
-        self.arm_sync();
+        // Keep pause state across the swap: clearing `paused` here would
+        // unpause behind the user's back on every rotation advance, and
+        // clearing `auto` would replay-then-repause while a fullscreen
+        // app stays open. Fresh runners already got `effective_pause`.
+        self.status = if self.paused {
+            i18n::tr(self.lang, "status_paused")
+        } else if self.auto_paused {
+            i18n::tr(self.lang, "status_autopaused")
+        } else {
+            self.video_status()
+        };
+        debug_log("swap ok");
     }
 
     /// Fresh playback of `path` on every selected monitor (first one
@@ -2852,6 +3019,19 @@ impl eframe::App for App {
         // the rotation tick (video-end driven; images dwell on interval).
         self.poll_player_events();
         self.rotation_tick();
+        // Preroll swap: all hidden canvases painted (or the deadline
+        // passed) — show them and reap the predecessors.
+        #[cfg(windows)]
+        {
+            let ready = !self.pending.is_empty()
+                && (self.pending.iter().all(|run| run.painted)
+                    || self
+                        .pending_deadline
+                        .is_some_and(|d| std::time::Instant::now() >= d));
+            if ready {
+                self.commit_preroll();
+            }
+        }
         // Z-order watchdog: opaque WorkerW backgrounds drift above our
         // canvases (video vanishes, audio plays on). Re-pin below icons,
         // logging only real reorderings (plus a playback poll line).
@@ -2879,7 +3059,16 @@ impl eframe::App for App {
                     canvas::ensure_canvases_stacked(&all);
                 }
             }
-            playback_poll_log(&self.file);
+            playback_poll_log(
+                &self.file,
+                self.running
+                    .as_ref()
+                    .and_then(|r| r.player.prop_bool("pause")),
+                self.running
+                    .as_ref()
+                    .and_then(|r| r.player.prop_f64("time-pos")),
+                self.running.as_ref().map(|r| r.eof.is_some()),
+            );
         }
         // Autopause poll (Python POLL_INTERVAL_MS): pause at once, resume
         // after 2 clean polls. Throttled — update() runs every ~50ms.

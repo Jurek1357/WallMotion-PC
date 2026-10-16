@@ -81,6 +81,32 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Registry]
 ; Same value the in-app autostart toggle manages, so both stay in sync.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "WallMotion"; ValueType: string; ValueData: """{app}\{#AppExe}"" --minimized"; Tasks: autostart; Flags: uninsdeletevalue
+; Right-click -> "Set as wallpaper" for media files (double-click keeps
+; the user's own defaults in Photos/Media Player). The app forwards
+; --set to the running instance, so no second window pops up.
+; uninsdeletekey on the verb removes the whole subtree on uninstall.
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

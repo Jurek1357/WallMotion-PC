@@ -172,6 +172,84 @@ pub fn list_media(directory: &Path) -> Vec<MediaItem> {
         .collect()
 }
 
+/// Result of importing files dropped onto the window.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ImportReport {
+    /// Files copied into the library.
+    pub added: usize,
+    /// Non-media files, folders, or files already in the library.
+    pub skipped: usize,
+    /// Copy failures (permission, disk, …).
+    pub failed: usize,
+}
+
+/// Copy dropped files into `dest` (the library folder).
+///
+/// Only video/image extensions are accepted (same set as the gallery);
+/// a file already sitting in `dest` is skipped, and a name clash gets a
+/// `name (2).ext` suffix so nothing is overwritten. `dest` is created
+/// when missing. Never panics.
+pub fn import_files(dest: &Path, sources: &[PathBuf]) -> ImportReport {
+    let mut report = ImportReport::default();
+    if std::fs::create_dir_all(dest).is_err() {
+        report.failed = sources.len();
+        return report;
+    }
+    let base = dest.canonicalize().unwrap_or_else(|_| dest.to_path_buf());
+    for src in sources {
+        let Some(file_name) = src.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            report.failed += 1;
+            continue;
+        };
+        if !src.is_file() || kind_of(&file_name).is_none() {
+            report.skipped += 1;
+            continue;
+        }
+        // Already inside the library folder (dropped from the folder
+        // itself): nothing to copy.
+        let in_place = src
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d == base))
+            .unwrap_or(false);
+        if in_place {
+            report.skipped += 1;
+            continue;
+        }
+        let target = unique_target(dest, &file_name);
+        match std::fs::copy(src, &target) {
+            Ok(_) => report.added += 1,
+            Err(_) => report.failed += 1,
+        }
+    }
+    report
+}
+
+/// `dest/name` when free, else `stem (2).ext`, `stem (3).ext`, …
+fn unique_target(dest: &Path, name: &str) -> PathBuf {
+    let first = dest.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+    for n in 2..1000 {
+        let candidate = match &ext {
+            Some(e) => format!("{stem} ({n}).{e}"),
+            None => format!("{stem} ({n})"),
+        };
+        let full = dest.join(candidate);
+        if !full.exists() {
+            return full;
+        }
+    }
+    first
+}
+
 /// Absolute path for a library file name, or None on traversal/missing.
 /// Mirrors Python `safe_name`.
 pub fn safe_path(directory: &Path, name: &str) -> Option<PathBuf> {
@@ -337,6 +415,81 @@ mod tests {
             None => std::env::remove_var("WALLMOTION_DOWNLOADS"),
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_copies_media_only() {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let src = std::env::temp_dir().join(format!("wallmotion-import-src-{n}"));
+        let dest = std::env::temp_dir().join(format!("wallmotion-import-dest-{n}"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("a.mp4"), b"video").unwrap();
+        std::fs::write(src.join("b.jpg"), b"image").unwrap();
+        std::fs::write(src.join("note.txt"), b"skip").unwrap();
+        let report = import_files(
+            &dest,
+            &[src.join("a.mp4"), src.join("b.jpg"), src.join("note.txt")],
+        );
+        assert_eq!(
+            report,
+            ImportReport {
+                added: 2,
+                skipped: 1,
+                failed: 0
+            }
+        );
+        assert!(dest.join("a.mp4").is_file());
+        assert!(dest.join("b.jpg").is_file());
+        assert!(!dest.join("note.txt").exists());
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[test]
+    fn import_skips_in_place_and_renames_clash() {
+        let dest = std::env::temp_dir().join("wallmotion-import-clash");
+        let other = std::env::temp_dir().join("wallmotion-import-other");
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&other);
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(dest.join("a.mp4"), b"orig").unwrap();
+        std::fs::write(other.join("a.mp4"), b"new").unwrap();
+        // Dropping the library file itself: already there -> skipped.
+        let r1 = import_files(&dest, &[dest.join("a.mp4")]);
+        assert_eq!(
+            r1,
+            ImportReport {
+                added: 0,
+                skipped: 1,
+                failed: 0
+            }
+        );
+        // Same name from elsewhere: renamed, the original stays intact.
+        let r2 = import_files(&dest, &[other.join("a.mp4")]);
+        assert_eq!(
+            r2,
+            ImportReport {
+                added: 1,
+                skipped: 0,
+                failed: 0
+            }
+        );
+        assert_eq!(std::fs::read(dest.join("a.mp4")).unwrap(), b"orig");
+        assert_eq!(std::fs::read(dest.join("a (2).mp4")).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn import_creates_missing_dest() {
+        let dest = std::env::temp_dir().join("wallmotion-import-fresh");
+        let _ = std::fs::remove_dir_all(&dest);
+        let report = import_files(&dest, &[]);
+        assert!(dest.is_dir());
+        assert_eq!(report, ImportReport::default());
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]

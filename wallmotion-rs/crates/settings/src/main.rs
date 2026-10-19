@@ -1125,6 +1125,60 @@ impl App {
         self.lib_scanned = true;
     }
 
+    /// Explorer drag & drop: files dropped onto the window are copied
+    /// into the library folder (media only, never overwriting), then the
+    /// gallery refreshes and the Library tab opens so the result shows.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let sources: Vec<PathBuf> = ctx
+            .input(|i| i.raw.dropped_files.clone())
+            .into_iter()
+            .filter_map(|f| f.path)
+            .collect();
+        if sources.is_empty() {
+            return;
+        }
+        let report = library::import_files(&library::media_dir(), &sources);
+        if report.added > 0 {
+            self.tab = Tab::Library;
+            self.lib_selected = None;
+            self.rescan_library(ctx);
+            self.status = i18n::trf(
+                self.lang,
+                "lib_drop_added",
+                &[("n", &report.added.to_string())],
+            );
+        } else if report.failed > 0 {
+            self.status = i18n::tr(self.lang, "lib_drop_failed");
+        } else {
+            self.status = i18n::tr(self.lang, "lib_drop_skipped");
+        }
+    }
+
+    /// Full-window hint while a file hovers over the window (drag & drop).
+    fn draw_drop_hint(&self, ctx: &egui::Context) {
+        let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if !hovering {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("wallmotion-drop-hint"),
+        ));
+        let rect = ctx.screen_rect();
+        painter.rect_filled(
+            rect,
+            egui::CornerRadius::ZERO,
+            egui::Color32::from_black_alpha(150),
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            i18n::tr(self.lang, "lib_drop_hint"),
+            egui::FontId::proportional(20.0),
+            egui::Color32::WHITE,
+        );
+    }
+
     /// One rotation tick. Timer-driven (videos loop, so unlike Python
     /// there is no follow-video-end mode).
     /// Advance the rotation: videos switch when the file finishes
@@ -2899,6 +2953,8 @@ impl eframe::App for App {
             self.pending_start = false;
             self.set_wallpaper();
         }
+        // Explorer drag & drop: copy dropped media into the library.
+        self.handle_dropped_files(ctx);
         // Cache our HWND once (for taskbar-free hide/reveal).
         #[cfg(windows)]
         if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
@@ -2989,6 +3045,8 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
         }
+        // Drag & drop overlay: shown while a file hovers over the window.
+        self.draw_drop_hint(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 // Language + theme toggles, top-right (like the Python header).

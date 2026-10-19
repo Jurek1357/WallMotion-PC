@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-10-19
+
+### Added
+- Drag & drop: drop video/image files from Explorer onto the window
+  and they are copied into the wallpaper library (media only, no
+  overwrite — name clashes get a ` (2)` suffix), the gallery refreshes
+  and the Library tab opens. A full-window hint shows while dragging.
+
 ### Changed
 - GitHub release notes are now composed automatically at tag time:
   static platform blurb + the matching version section from this

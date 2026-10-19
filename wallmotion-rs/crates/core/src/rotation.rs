@@ -212,6 +212,28 @@ impl RotationQueue {
         self.index = -1;
         self.next_file()
     }
+
+    /// Snap the cursor onto the given file (if listed) so rotation
+    /// continues *after* it. Manual picks don't move the cursor, so
+    /// enabling rotation mid-playlist would otherwise advance from a
+    /// stale position (or stop at once when the cursor sits at the
+    /// end with repeat off). Tolerates the `\\?\` prefix mismatch.
+    pub fn snap_to(&mut self, path: &str) {
+        let mut cands = vec![path.to_string()];
+        if let Some(stripped) = path.strip_prefix(r"\\?\") {
+            cands.push(stripped.to_string());
+        } else {
+            cands.push(format!(r"\\?\{}", path));
+        }
+        for c in &cands {
+            if let Some(pos) = self.files.iter().position(|p| p == c) {
+                if let Some(ord) = self.order.iter().position(|&i| i == pos) {
+                    self.index = ord as i64;
+                    return;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +323,32 @@ mod tests {
         q.next_file();
         q.next_file();
         assert_eq!(q.restart().as_deref(), Some(files[0].as_str()));
+    }
+
+    #[test]
+    fn snap_to_continues_after_current() {
+        let (_dir, files) = fixture();
+        // Stale cursor at the end (manual picks don't move it).
+        let mut q = RotationQueue::new(files.clone(), 99, false, false);
+        q.snap_to(&files[0]);
+        assert_eq!(q.next_file().as_deref(), Some(files[1].as_str()));
+    }
+
+    #[test]
+    fn snap_to_tolerates_verbatim_prefix() {
+        let (_dir, files) = fixture();
+        let mut q = RotationQueue::new(files.clone(), 99, false, true);
+        q.snap_to(&format!(r"\\?\{}", files[2]));
+        // Wrapped around: after the last item comes the first.
+        assert_eq!(q.next_file().as_deref(), Some(files[0].as_str()));
+    }
+
+    #[test]
+    fn snap_to_unknown_keeps_cursor() {
+        let (_dir, files) = fixture();
+        let mut q = RotationQueue::new(files.clone(), 1, false, true);
+        q.snap_to("/definitely/not/here.mp4");
+        assert_eq!(q.next_file().as_deref(), Some(files[2].as_str()));
     }
 
     #[test]

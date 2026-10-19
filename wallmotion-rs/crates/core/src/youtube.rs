@@ -32,6 +32,33 @@ pub const YTDLP_DOWNLOAD_URL: &str =
 pub const FFMPEG_DOWNLOAD_URL: &str =
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 
+/// Download video codec preference. H.264 plays everywhere (default);
+/// AV1 files are ~half the size at the same quality but need more CPU
+/// to decode (no HW decoder on older machines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VideoCodec {
+    #[default]
+    H264,
+    Av1,
+}
+
+impl VideoCodec {
+    /// Config-file code (`"h264"`/`"av1"`). Unknown codes fall back to H.264.
+    pub fn code(self) -> &'static str {
+        match self {
+            VideoCodec::H264 => "h264",
+            VideoCodec::Av1 => "av1",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Self {
+        match code.trim().to_lowercase().as_str() {
+            "av1" | "av01" => VideoCodec::Av1,
+            _ => VideoCodec::H264,
+        }
+    }
+}
+
 /// Only H.264/AVC up to 1080p, always with audio (merged tracks,
 /// needs ffmpeg). Same branches as the Python `_YT_FORMAT_MERGED`.
 pub const FORMAT_MERGED: &str = "bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[acodec^=mp4a]/\
@@ -46,6 +73,45 @@ pub const FORMAT_SINGLE: &str = "b[vcodec^=avc1][acodec^=mp4a][height<=1080][ext
     b[vcodec^=avc1][acodec!=none][height<=1080][ext=mp4]/\
     b[vcodec^=avc1][acodec^=mp4a][height<=1080]/\
     b[vcodec^=avc1][acodec!=none][height<=1080]";
+/// AV1 first (smaller files), full H.264 chain as fallback when the
+/// video has no AV1 renditions. Merged tracks, needs ffmpeg.
+pub const FORMAT_MERGED_AV1: &str = "bv*[vcodec^=av01][height<=1080][ext=mp4]+ba[acodec^=mp4a]/\
+    bv*[vcodec^=av01][height<=1080]+ba[acodec^=mp4a]/\
+    bv*[vcodec^=av01][height<=1080][ext=mp4]+ba[acodec!=none]/\
+    b[vcodec^=av01][acodec^=mp4a][height<=1080][ext=mp4]/\
+    bv*[vcodec^=av01][height<=1080]+ba[acodec!=none]/\
+    b[vcodec^=av01][acodec!=none][height<=1080]/\
+    bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[acodec^=mp4a]/\
+    bv*[vcodec^=avc1][height<=1080]+ba[acodec^=mp4a]/\
+    bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[acodec!=none]/\
+    b[vcodec^=avc1][acodec^=mp4a][height<=1080][ext=mp4]/\
+    bv*[vcodec^=avc1][height<=1080]+ba[acodec!=none]/\
+    b[vcodec^=avc1][acodec!=none][height<=1080]";
+/// AV1 single file with audio, H.264 fallback. No merging (no ffmpeg).
+pub const FORMAT_SINGLE_AV1: &str = "b[vcodec^=av01][acodec^=mp4a][height<=1080][ext=mp4]/\
+    b[vcodec^=av01][acodec!=none][height<=1080][ext=mp4]/\
+    b[vcodec^=av01][acodec^=mp4a][height<=1080]/\
+    b[vcodec^=av01][acodec!=none][height<=1080]/\
+    b[vcodec^=avc1][acodec^=mp4a][height<=1080][ext=mp4]/\
+    b[vcodec^=avc1][acodec!=none][height<=1080][ext=mp4]/\
+    b[vcodec^=avc1][acodec^=mp4a][height<=1080]/\
+    b[vcodec^=avc1][acodec!=none][height<=1080]";
+
+/// True when `ffmpeg -decoders` output lists an AV1 video decoder
+/// (dav1d / aom / native av1). Pure parser for
+/// [`crate::youtube`] consumers; `None`/unreadable means unknown.
+pub fn decoders_has_av1(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim();
+        // Decoder lines look like: " V..... av1  Alliance ... (decoders: libdav1d ...)".
+        // The first token after the flags is the codec name.
+        let mut parts = line.split_whitespace();
+        let flags = parts.next().unwrap_or_default();
+        let name = parts.next().unwrap_or_default();
+        // Flags: V=video, . * X . . . — must start with 'V'.
+        flags.starts_with('V') && (name == "av1" || name == "libdav1d" || name == "libaom-av1")
+    })
+}
 
 /// One playlist entry from `--print "%(id)s\t%(title)s"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,7 +380,17 @@ pub fn map_download_error(err: &str, ffmpeg_present: bool) -> String {
 /// CLI args for a single-video download (without the exe or URL).
 /// `--print` lines carry the final filepath (after merge/move when
 /// ffmpeg ran); progress is parsed from `--newline` stdout lines.
-pub fn download_args(out_template: &str, ffmpeg_dir: Option<&str>) -> Vec<String> {
+pub fn download_args(
+    out_template: &str,
+    ffmpeg_dir: Option<&str>,
+    codec: VideoCodec,
+) -> Vec<String> {
+    let format = match (ffmpeg_dir.is_some(), codec) {
+        (true, VideoCodec::Av1) => FORMAT_MERGED_AV1,
+        (true, VideoCodec::H264) => FORMAT_MERGED,
+        (false, VideoCodec::Av1) => FORMAT_SINGLE_AV1,
+        (false, VideoCodec::H264) => FORMAT_SINGLE,
+    };
     let mut args = vec![
         "--no-playlist".to_string(),
         "--socket-timeout".to_string(),
@@ -326,11 +402,7 @@ pub fn download_args(out_template: &str, ffmpeg_dir: Option<&str>) -> Vec<String
         "--max-filesize".to_string(),
         MAX_FILESIZE.to_string(),
         "-f".to_string(),
-        if ffmpeg_dir.is_some() {
-            FORMAT_MERGED.to_string()
-        } else {
-            FORMAT_SINGLE.to_string()
-        },
+        format.to_string(),
         "--merge-output-format".to_string(),
         "mp4".to_string(),
         "-o".to_string(),
@@ -537,14 +609,52 @@ mod tests {
 
     #[test]
     fn arg_builders() {
-        let args = download_args("C:/d/%(id)s.%(ext)s", Some("C:/t"));
+        let args = download_args("C:/d/%(id)s.%(ext)s", Some("C:/t"), VideoCodec::H264);
         assert!(args.contains(&"-f".to_string()));
         assert!(args.contains(&FORMAT_MERGED.to_string()));
         assert!(args.contains(&"--ffmpeg-location".to_string()));
-        let args = download_args("C:/d/%(id)s.%(ext)s", None);
+        let args = download_args("C:/d/%(id)s.%(ext)s", None, VideoCodec::H264);
         assert!(args.contains(&FORMAT_SINGLE.to_string()));
         assert!(!args.contains(&"--ffmpeg-location".to_string()));
         let pl = playlist_args();
         assert!(pl.contains(&"--flat-playlist".to_string()));
+    }
+
+    #[test]
+    fn codec_codes_roundtrip() {
+        assert_eq!(VideoCodec::default(), VideoCodec::H264);
+        assert_eq!(VideoCodec::H264.code(), "h264");
+        assert_eq!(VideoCodec::Av1.code(), "av1");
+        assert_eq!(VideoCodec::from_code("av1"), VideoCodec::Av1);
+        assert_eq!(VideoCodec::from_code("AV01"), VideoCodec::Av1);
+        assert_eq!(VideoCodec::from_code("h264"), VideoCodec::H264);
+        assert_eq!(VideoCodec::from_code("whatever"), VideoCodec::H264);
+        assert_eq!(VideoCodec::from_code(""), VideoCodec::H264);
+    }
+
+    #[test]
+    fn av1_formats_prefer_av01_with_avc_fallback() {
+        // AV1 branches come first, H.264 chain stays as fallback.
+        let av1_first = FORMAT_MERGED_AV1.find("vcodec^=av01").unwrap();
+        let avc_first = FORMAT_MERGED_AV1.find("vcodec^=avc1").unwrap();
+        assert!(av1_first < avc_first);
+        assert!(FORMAT_MERGED_AV1.contains(FORMAT_MERGED.split('/').next().unwrap()));
+        let av1_first = FORMAT_SINGLE_AV1.find("vcodec^=av01").unwrap();
+        let avc_first = FORMAT_SINGLE_AV1.find("vcodec^=avc1").unwrap();
+        assert!(av1_first < avc_first);
+        // download_args picks by codec.
+        let args = download_args("o", Some("f"), VideoCodec::Av1);
+        assert!(args.contains(&FORMAT_MERGED_AV1.to_string()));
+        let args = download_args("o", None, VideoCodec::Av1);
+        assert!(args.contains(&FORMAT_SINGLE_AV1.to_string()));
+    }
+
+    #[test]
+    fn av1_decoder_detection() {
+        let sample = "Decoders:\n V..... av1  Alliance for Open Media AV1 (decoders: libdav1d libaom-av1 av1 )\n V..... h264  H.264 (decoders: h264 )\n A..... aac  AAC\n";
+        assert!(decoders_has_av1(sample));
+        assert!(!decoders_has_av1("Decoders:\n V..... h264  H.264\n"));
+        assert!(!decoders_has_av1(""));
+        assert!(!decoders_has_av1("garbage\nno decoders here"));
     }
 }

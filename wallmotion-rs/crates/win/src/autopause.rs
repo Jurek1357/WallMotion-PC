@@ -16,12 +16,20 @@ pub fn is_fullscreen_app_active() -> bool {
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, GetForegroundWindow, GetWindowRect,
+        GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
     };
 
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.0.is_null() {
+            return false;
+        }
+        // Own Settings window is never a "fullscreen app": a maximized
+        // settings window would otherwise pause the wallpaper 2 s after
+        // every Play press (autopause poll), looking like "starts then stops".
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == std::process::id() {
             return false;
         }
         let mut cls = [0u16; 64];

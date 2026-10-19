@@ -5,6 +5,9 @@
 ;   - optional one-click media tools (yt-dlp + ffmpeg, downloaded from
 ;     the official upstreams into {app}\tools, where the app finds them;
 ;     same URLs as the in-app auto-install, so both paths stay in sync)
+;   - already-present tools are NOT re-downloaded: {app}\tools first,
+;     then user/system PATH (the app finds both, so a second copy
+;     would only waste bandwidth)
 ;   - optional user-PATH entry, desktop icon, autostart (same Run value
 ;     the in-app toggle manages: "WallMotion" -> exe --minimized)
 ;
@@ -78,6 +81,32 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Registry]
 ; Same value the in-app autostart toggle manages, so both stay in sync.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "WallMotion"; ValueType: string; ValueData: """{app}\{#AppExe}"" --minimized"; Tasks: autostart; Flags: uninsdeletevalue
+; Right-click -> "Set as wallpaper" for media files (double-click keeps
+; the user's own defaults in Photos/Media Player). The app forwards
+; --set to the running instance, so no second window pops up.
+; uninsdeletekey on the verb removes the whole subtree on uninstall.
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mkv\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.avi\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\WallMotion"; ValueType: string; ValueData: "Set as wallpaper (WallMotion)"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\WallMotion\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --set ""%1"""
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
@@ -90,7 +119,9 @@ Type: files; Name: "{app}\libmpv-2.dll.download"
 
 [Code]
 { Download + install the checked media tools with PowerShell/tar.exe
-  (both ship Windows 10+): no Inno plugins needed. Failures only warn —
+  (both ship Windows 10+): no Inno plugins needed. Already-present
+  tools are skipped (app tools dir, then PATH) so reinstalls and
+  system-wide copies never download twice. Failures only warn —
   the app auto-installs missing tools on first launch anyway. }
 procedure FetchTools();
 var
@@ -112,9 +143,23 @@ begin
     + '$ytUrl=''{#YtdlpUrl}'';'
     + '$ffUrl=''{#FfmpegUrl}'';'
     + WantYt + WantFf
+    + 'function Have-Cmd($n) {'
+    + '  foreach ($x in $n) {'
+    + '    $c=Get-Command $x -ErrorAction SilentlyContinue | Select-Object -First 1;'
+    + '    if ($c) { return $true }'
+    + '  }'
+    + '  return $false'
+    + '};'
     + 'New-Item -ItemType Directory -Force -Path $tools | Out-Null;'
-    + 'if ($toolsYt) { Invoke-WebRequest -Uri $ytUrl -OutFile (Join-Path $tools ''yt-dlp.exe''); }'
+    + 'if ($toolsYt) {'
+    + '  $dest=Join-Path $tools ''yt-dlp.exe'';'
+    + '  $have=(Test-Path -LiteralPath $dest) -or (Have-Cmd @(''yt-dlp.exe'',''yt-dlp''));'
+    + '  if (-not $have) { Invoke-WebRequest -Uri $ytUrl -OutFile $dest; }'
+    + '}'
     + 'if ($toolsFf) {'
+    + '  $dest=Join-Path $tools ''ffmpeg.exe'';'
+    + '  $have=(Test-Path -LiteralPath $dest) -or (Have-Cmd @(''ffmpeg.exe'',''ffmpeg''));'
+    + '  if (-not $have) {'
     + '  $zip=Join-Path $env:TEMP ''wallmotion-ffmpeg.zip'';'
     + '  $tmp=Join-Path $env:TEMP ''wallmotion-ffmpeg-x'';'
     + '  Invoke-WebRequest -Uri $ffUrl -OutFile $zip;'
@@ -124,8 +169,9 @@ begin
     + '  if ($LASTEXITCODE -ne 0) { throw ''unpacking ffmpeg failed''; }'
     + '  $ff=Get-ChildItem -Path $tmp -Recurse -Filter ''ffmpeg.exe'' | Select-Object -First 1;'
     + '  if (-not $ff) { throw ''ffmpeg.exe not found in archive''; }'
-    + '  Move-Item -LiteralPath $ff.FullName -Destination (Join-Path $tools ''ffmpeg.exe'') -Force;'
+    + '  Move-Item -LiteralPath $ff.FullName -Destination $dest -Force;'
     + '  Remove-Item -Recurse -Force $tmp, $zip -ErrorAction SilentlyContinue;'
+    + '  }'
     + '}';
   WizardForm.StatusLabel.Caption := 'Downloading media tools (yt-dlp, ffmpeg)...';
   if not Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command ' + Ps,

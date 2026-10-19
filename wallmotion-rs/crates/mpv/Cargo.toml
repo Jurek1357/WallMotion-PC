@@ -1,0 +1,11 @@
+[package]
+name = "wallmotion-mpv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WallMotion libmpv backend spike: in-process video playback via libmpv2 (replaces the mpv sidecar)"
+
+[dependencies]
+libmpv2 = "6"
+
+[dev-dependencies]

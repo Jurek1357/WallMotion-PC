@@ -21,4 +21,8 @@ wallmotion.png
 # Rust build cache
 target/
 
+# Local mpv dev files for the libmpv spike (DLL + import lib + headers,
+# ~150 MB; CI downloads its own copy)
+wallmotion-rs/deps/
+
 dist-installer/

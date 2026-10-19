@@ -31,8 +31,10 @@ follow-system toggle,
   pause on fullscreen/battery, CLI (`--set/--stop/--mute/--volume`),
   hide-to-tray on X.
 
-Video wallpapers need `mpv` on PATH (the classic exe brings its own
-decoder; the native one drives mpv). Everything else the native app
+Video playback is built in (libmpv ships next to the exe as
+`libmpv-2.dll` — no mpv install needed; it needs the GPU driver
+Vulkan loader present, which any working graphics driver provides).
+Everything else the native app
 downloads itself on first launch (yt-dlp + ffmpeg auto-install, daily
 update checks with one-click install + restart). Prefer the Windows
 installer (`WallMotion-Setup-*.exe`: folder picker, optional media
@@ -47,10 +49,10 @@ cargo build --release -p wallmotion-settings --manifest-path wallmotion-rs/Cargo
 ### How it works
 
 - **Image:** resized/cropped to the measured resolution and set via `SystemParametersInfo`.
-- **Video:** decoded with Qt Multimedia (`QMediaPlayer` + `QVideoSink`); frames are painted with GDI (`StretchDIBits`, fast `COLORONCOLOR` stretch, ~6 ms/frame at 1080p) onto a native window:
-  - on Windows 11 ("raised desktop") as an opaque `WS_EX_LAYERED` child of `Progman`, z-ordered `WorkerW` → **video** → `SHELLDLL_DefView` (same technique as Lively / Wallpaper Engine, per Microsoft guidance),
+- **Video:** decoded in-process by the bundled libmpv (`libmpv-2.dll`, ffmpeg codecs — no mpv install needed); it renders straight into a native canvas window (one per monitor):
+  - on Windows 11 ("raised desktop") as an opaque `WS_EX_LAYERED` child of `Progman`, stacked `WorkerW` → **video** → `SHELLDLL_DefView` (same technique as Lively / Wallpaper Engine, per Microsoft guidance),
   - on older Windows as a child of the `WorkerW` window spawned with message `0x052C`.
-- Safety guards: frame throttling (~40 fps max, no memory backlog), auto-downscale of 4K/8K frames, and a watchdog that removes the canvas with a clear message if a video produces no frames (e.g. AV1 files, which Qt can't decode here – the downloader avoids them automatically).
+- Playback is event-driven: first-frame and end-of-file arrive as player events, so all monitors start in sync and rotation advances without polling. Hardware decoding is on where available, the last frame stays on screen across switches, and a 500 ms watchdog keeps the canvases pinned below the desktop icons (a drifting opaque `WorkerW` would otherwise flash the original wallpaper).
 - Clicks and focus never get stolen (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
 
 ### Install & run (from source)
@@ -69,7 +71,7 @@ Drop an image/video onto the window (or click to browse) and hit **Set as wallpa
 - **YouTube field** – paste a link, hit the button, download runs on a background thread with progress in the status line. Only genuine YouTube links are accepted. Downloads are stored in the `downloads/` folder next to the app (or .exe).
 - **Sound** – uncheck *Mute video sound* and set the volume with the slider; both act instantly. Merging of picture and sound is handled by the built-in ffmpeg, nothing to install.
 - Language/theme dropdowns are at the top; everything (incl. last file and mute) is saved to `%USERPROFILE%\.live_wallpaper_config.json`.
-- Debug log (if anything misbehaves): `%TEMP%\live_wallpaper_debug.log`.
+- Debug log (if anything misbehaves): `%TEMP%\wallmotion-settings-debug.log` (native app) or `%TEMP%\live_wallpaper_debug.log` (Python).
 
 ### Standalone .exe
 
@@ -127,7 +129,7 @@ sessions welcome (attach `~/.local/state/wallmotion/debug.log`).
 
 - Per-monitor video/image selection in the UI; true per-monitor static
   images on Windows still use one fitted image for the whole desktop.
-- Video formats depend on Qt Multimedia codecs (mp4/H.264 works out of the box; AV1/VP9 files are refused with a message, the downloader only ever fetches H.264).
+- Video formats depend on the bundled libmpv (ffmpeg codecs): mp4/H.264 works out of the box; the downloader only ever fetches H.264.
 - The video wallpaper needs the app running – after a reboot, launch it again (or use autostart).
 - YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it, ffmpeg rides along via `imageio-ffmpeg`).
 - No Python needed if you use the ready-made `WallMotion.exe` from [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
@@ -144,10 +146,12 @@ its publisher"). The app is safe (MIT-licensed, source above) – pick one:
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs via
 [Issues](https://github.com/Jurek1357/WallMotion-PC/issues) and attach
-`%TEMP%\live_wallpaper_debug.log`. Planned work: [TODO.md](TODO.md);
+`%TEMP%\wallmotion-settings-debug.log`. Planned work: [TODO.md](TODO.md);
 stack analysis and Linux plan: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Released under the [MIT license](LICENSE); the bundled ffmpeg binary keeps
-its own (L)GPL license, and the bundled Hanabi GNOME Shell extension stays
+its own (L)GPL license, the bundled `libmpv-2.dll` stays GPL-2.0+
+([mpv source](https://github.com/mpv-player/mpv)), and the bundled Hanabi
+GNOME Shell extension stays
 GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).
 
 ---
@@ -176,8 +180,9 @@ ve starších releasích a ve zdrojácích) – nativní přepis v Rustu
   pauza na fullscreen/baterii, CLI (`--set/--stop/--mute/--volume`),
   schování do traye křížkem.
 
-Video tapety potřebují `mpv` v PATH (klasické exe má dekodér vlastní;
-nativní řídí mpv). Vše ostatní si nativní apka stáhne sama na první
+Přehrávání videa je vestavěné (libmpv leží vedle exe jako
+`libmpv-2.dll` — žádné mpv se neinstaluje; stačí funkční grafický
+ovladač s Vulkan loaderem, který má každý). Vše ostatní si nativní apka stáhne sama na první
 kliknutí. Build ze zdrojáků s Rust toolchainem (plus MinGW-w64 nebo
 MSVC):
 
@@ -188,10 +193,10 @@ cargo build --release -p wallmotion-settings --manifest-path wallmotion-rs/Cargo
 ### Jak to funguje
 
 - **Obrázek:** ořízne se na změřené rozlišení a nastaví přes `SystemParametersInfo`.
-- **Video:** dekóduje Qt Multimedia (`QMediaPlayer` + `QVideoSink`), snímky se malují přes GDI (`StretchDIBits`, rychlý `COLORONCOLOR` stretch, cca 6 ms/snímek při 1080p) do nativního okna:
+- **Video:** dekóduje vestavěné libmpv (`libmpv-2.dll`, kodeky z ffmpeg — žádné mpv se neinstaluje); kreslí rovnou do nativního plátna (jedno na monitor):
   - na Windows 11 („raised desktop“) jako neprůhledný `WS_EX_LAYERED` potomek `Progmanu`, ve vrstvách `WorkerW` → **video** → `SHELLDLL_DefView` (stejný postup jako Lively / Wallpaper Engine, dle Microsoftu),
   - na starších Windows jako potomek okna `WorkerW` vytvořeného zprávou `0x052C`.
-- Pojistky: throttle snímků (max ~40/s, fronta se nenafukuje), auto-zmenšení 4K/8K snímků a watchdog, který při nulovém počtu snímků plátno zruší s hláškou (např. AV1 soubory, které Qt tu nedekóduje – stahovač se jim automaticky vyhýbá).
+- Přehrávání řídí události: první snímek a konec souboru chodí jako eventy, takže všechny monitory startují synchronně a rotace se posouvá bez pollingu. Kde to jde, jede hardwarové dekódování, poslední snímek zůstává na plátně i přes přepnutí videa a 500ms watchdog drží plátna připnutá pod ikonami plochy (jinak by zatoulané neprůhledné `WorkerW` problikávalo původní tapetou).
 - Kliky ani focus se nekradou (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`).
 
 ### Instalace a spuštění (ze zdrojáků)
@@ -210,7 +215,7 @@ Přetáhni obrázek/video do okna (nebo klikni pro výběr) a stiskni **Nastavit
 - **YouTube políčko** – vlož odkaz, stiskni tlačítko, stahování běží ve vlákně na pozadí s průběhem ve stavovém řádku. Berou se jen pravé YouTube odkazy. Stažená videa najdeš ve složce `downloads/` vedle aplikace (nebo .exe).
 - **Zvuk** – odškrtni *Ztlumit zvuk videa* a nastav hlasitost sliderem; obojí funguje hned. Sloučení obrazu a zvuku řeší přibalený ffmpeg, nic se neinstaluje.
 - Jazyk/motiv se přepíná roletkami nahoře; vše (včetně posledního souboru a ztlumení) se ukládá do `%USERPROFILE%\.live_wallpaper_config.json`.
-- Debug log (kdyby něco zlobilo): `%TEMP%\live_wallpaper_debug.log`.
+- Debug log (kdyby něco zlobilo): `%TEMP%\wallmotion-settings-debug.log` (nativní apka) nebo `%TEMP%\live_wallpaper_debug.log` (Python).
 
 ### Samostatné .exe
 
@@ -267,7 +272,7 @@ session vítána (přilož `~/.local/state/wallmotion/debug.log`).
 
 - V UI jde vybrat monitor pro video i obrázek; statický obrázek na
   Windows se pořád nastavuje jeden pro celou plochu.
-- Formáty videa závisí na kodecích v Qt Multimedia (mp4/H.264 bez problémů; soubory AV1/VP9 se odmítnou s hláškou, stahovač tahá jen H.264).
+- Formáty videa závisí na přibaleném libmpv (kodeky z ffmpeg): mp4/H.264 bez problémů; stahovač tahá jen H.264.
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
 - Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`, ffmpeg se přibalí přes `imageio-ffmpeg`).
 - Bez Pythonu se obejdeš s hotovým `WallMotion.exe` ze záložky [Releases](https://github.com/Jurek1357/WallMotion-PC/releases).
@@ -285,8 +290,10 @@ vydavatele"). Appka je bezpečná (MIT licence, zdrojáky výše) – vyber si:
 
 Příspěvky vítány — viz [CONTRIBUTING.md](CONTRIBUTING.md). Chyby hlas do
 [Issues](https://github.com/Jurek1357/WallMotion-PC/issues) a přilož
-`%TEMP%\live_wallpaper_debug.log`. Plán práce: [TODO.md](TODO.md);
+`%TEMP%\wallmotion-settings-debug.log`. Plán práce: [TODO.md](TODO.md);
 analýza stacku a Linux plán: [docs/STACK_ANALYSIS.md](docs/STACK_ANALYSIS.md).
 Kód je pod [licencí MIT](LICENSE); přibalená ffmpeg binárka si nese vlastní
-(L)GPL licenci a přibalené rozšíření Hanabi pro GNOME Shell zůstává pod
+(L)GPL licenci, přibalená `libmpv-2.dll` zůstává pod GPL-2.0+
+([zdrojáky mpv](https://github.com/mpv-player/mpv)) a přibalené rozšíření
+Hanabi pro GNOME Shell zůstává pod
 GPL-3.0 (`assets/hanabi-extension-LICENSE.txt`).

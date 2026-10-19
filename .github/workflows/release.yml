@@ -16,18 +16,64 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # In-process playback links libmpv (MSVC needs mpv.lib generated
+      # from the DLL's exports; shinchiro ships only a MinGW import lib).
+      - name: Install mpv dev files
+        shell: pwsh
+        working-directory: wallmotion-rs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          curl.exe -L --fail --retry 5 --retry-delay 15 --retry-all-errors -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z
+          7z x mpv-dev.7z -odeps/mpv-dev include libmpv-2.dll libmpv.dll.a -y
+          if (!(Test-Path 'deps/mpv-dev/libmpv-2.dll')) { throw 'DLL missing after extract' }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'vswhere found no VS with VC tools' }
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $dumpbin = Join-Path $bindir 'dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw "dumpbin missing: $dumpbin" }
+          $out = & $dumpbin /exports 'deps/mpv-dev/libmpv-2.dll'
+          $exports = $out | Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' | ForEach-Object { $_.Matches.Groups[1].Value } | Where-Object { $_ -like 'mpv_*' } | Sort-Object -Unique
+          Write-Host "mpv exports found: $($exports.Count)"
+          if ($exports.Count -lt 50) { $out | Select-Object -First 25 | Write-Host; throw 'too few mpv exports parsed' }
+          # NOTE: LIBRARY must be the real file name (libmpv-2.dll):
+          # anything else links an exe that can't find its DLL at startup.
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
+          & (Join-Path $bindir 'lib.exe') /def:mpv.def /out:deps/mpv-dev/mpv.lib /machine:x64
+          if ($LASTEXITCODE -ne 0) { throw "lib.exe failed: $LASTEXITCODE" }
+          $lib = Get-Item 'deps/mpv-dev/mpv.lib'
+          Write-Host "mpv.lib bytes: $($lib.Length)"
+          if ($lib.Length -lt 10000) { throw 'mpv.lib suspiciously small' }
+
       - name: Build native settings (release)
         run: cargo build --release -p wallmotion-settings
         working-directory: wallmotion-rs
 
-      - name: Stage exe
-        run: Copy-Item wallmotion-rs\target\release\wallmotion-settings.exe WallMotion-Settings.exe
+      # The exe must import libmpv-2.dll (the shipped file name) —
+      # v1.2.0 linked mpv-2.dll and died at startup. Fail fast here.
+      - name: Verify libmpv import name
+        shell: pwsh
+        working-directory: wallmotion-rs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $deps = & (Join-Path $bindir 'dumpbin.exe') /dependents target/release/wallmotion-settings.exe
+          if (!($deps -match '^\s+libmpv-2\.dll\s*$')) { $deps | Write-Host; throw 'exe does not import libmpv-2.dll' }
+          if ($deps -match '^\s+mpv-2\.dll\s*$') { throw 'exe imports bare mpv-2.dll (v1.2.0 bug)' }
+          Write-Host 'import check OK: libmpv-2.dll'
+
+      - name: Stage exe + playback library
+        run: |
+          Copy-Item wallmotion-rs\target\release\wallmotion-settings.exe WallMotion-Settings.exe
+          Copy-Item wallmotion-rs\deps\mpv-dev\libmpv-2.dll libmpv-2.dll
 
       - name: Upload exe artifact
         uses: actions/upload-artifact@v7
         with:
           name: WallMotion-Settings-exe
-          path: WallMotion-Settings.exe
+          path: |
+            WallMotion-Settings.exe
+            libmpv-2.dll
 
   build-installer:
     needs: [build-rs]
@@ -36,13 +82,16 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download exe artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: WallMotion-Settings-exe
           path: installer-piece
 
-      - name: Stage exe for Inno
-        run: New-Item -ItemType Directory -Force -Path wallmotion-rs\target\release | Out-Null; Copy-Item installer-piece\WallMotion-Settings.exe wallmotion-rs\target\release\wallmotion-settings.exe
+      - name: Stage exe + DLL for Inno
+        run: |
+          New-Item -ItemType Directory -Force -Path wallmotion-rs\target\release | Out-Null
+          Copy-Item installer-piece\WallMotion-Settings.exe wallmotion-rs\target\release\wallmotion-settings.exe
+          Copy-Item installer-piece\libmpv-2.dll wallmotion-rs\target\release\libmpv-2.dll
 
       - name: Locate Inno Setup (preinstalled, else choco)
         run: |
@@ -69,9 +118,10 @@ jobs:
       - name: Install Linux GUI + deb deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev dpkg-dev liblzma-dev
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev dpkg-dev liblzma-dev
           sudo apt-get install -y libglib2.0-dev libgtk-3-dev libxdo-dev
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
+          sudo apt-get install -y libmpv-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -93,23 +143,45 @@ jobs:
     needs: [build-rs, build-installer, build-deb]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
+
+      # Body = static platform blurb + the matching "## [x.y.z]" section
+      # from CHANGELOG.md, so tagging a release no longer needs manual
+      # `gh release edit` afterwards.
+      - name: Compose release notes (blurb + CHANGELOG section)
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "The native WallMotion app — no Python needed."
+            echo
+            echo "- **Windows:** prefer \`WallMotion-Setup-*.exe\` (installer with optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the portable \`WallMotion-Settings.exe\` + \`libmpv-2.dll\` side by side, with in-app updates."
+            echo "- **Linux:** \`wallmotion_*.deb\` (needs \`ffmpeg\` + \`libmpv2\` from your distro; tools self-install on first launch)."
+            echo
+            echo "Video playback is built in (libmpv ships next to the exe as \`libmpv-2.dll\`, installed by the Setup) — no mpv install needed."
+            echo
+            awk -v ver="$version" '
+              $0 ~ "^## \\[" ver "\\]" { hit=1; print; next }
+              hit && /^## \[/ { exit }
+              hit { print }
+            ' CHANGELOG.md
+          } > release-notes.md
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md has no section for $version — notes are blurb only"
+          fi
+          echo "----- release-notes.md -----"
+          cat release-notes.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*
           generate_release_notes: true
-          body: |
-            The native WallMotion app — no Python needed.
-            - **Windows:** prefer `WallMotion-Setup-*.exe` (installer with
-              optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the
-              portable `WallMotion-Settings.exe` with in-app updates.
-            - **Linux:** `wallmotion_*.deb` (needs `ffmpeg` from your distro;
-              tools self-install on first launch).
-            Needs **mpv** for video wallpapers. The classic Python app stays
-            available in older releases and in the sources.
+          body_path: release-notes.md

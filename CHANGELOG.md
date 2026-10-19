@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- GitHub release notes are now composed automatically at tag time:
+  static platform blurb + the matching version section from this
+  `CHANGELOG.md` (no more manual `gh release edit` afterwards).
+
+## [1.2.6] - 2026-10-16
+
+### Added
+- Animated GIF wallpapers: GIFs play through mpv (looped single,
+  rotation-aware) instead of freezing on the first frame. The
+  rotation card warns when the playlist holds a GIF (no timeline —
+  rotation may stall on one).
+- Explorer right-click "Set as wallpaper (WallMotion)" for video /
+  image files (installer registers per-extension verbs, removed on
+  uninstall; double-click keeps the user's own defaults).
+
+## [1.2.5] - 2026-10-16
+
+### Fixed
+- Windows installer no longer re-downloads yt-dlp/ffmpeg when
+  already present (`{app}\tools` first, then user/system PATH —
+  the app finds both, so a second copy only wasted bandwidth).
+
+## [1.2.4] - 2026-10-16
+
+### Added
+- YouTube download codec choice: H.264 (plays everywhere, default)
+  or AV1 (~half the file size at the same quality). AV1 falls back
+  to H.264 when a video has no AV1 renditions. The app checks
+  `ffmpeg -decoders` once at startup and warns when no AV1 decoder
+  is found (download still works, playback may stutter on older
+  machines without hardware AV1 decode).
+
+## [1.2.3] - 2026-10-16
+
+### Added
+- Seamless video switching: the next video pre-rolls on hidden
+  canvases while the old one keeps playing, then swaps on the first
+  frame — rotation advances without a gap. A failed pre-roll keeps
+  the old video instead of going dark.
+
+### Fixed
+- Playlist freezing on video end: a lost mpv EndOfFile event left
+  rotation waiting forever (keep-open idle on the last frame). The
+  `eof-reached` property is now the fallback signal, and `loop-file`
+  is set before `loadfile` so single videos loop reliably.
+- Rotation cursor drift: manual picks no longer leave the cursor at
+  the end of the list (rotation snaps to the playing file when
+  enabled, so it continues after it instead of stopping at once).
+- Autopause misfires: the maximized Settings window counted as a
+  fullscreen app and paused the wallpaper ~2 s after every Play.
+  Own-process windows are ignored now, and turning a rule off resumes
+  an already-frozen player at once.
+
+## [1.2.2] - 2026-10-15
+
+### Fixed
+- Wallpaper flickering to the original wallpaper on multi-monitor
+  setups: every canvas fought for the single slot right below the
+  desktop icons (z-order watchdog re-pinned every 2 s). Canvases now
+  stack in order below the icons and the watchdog runs every 500 ms.
+- Flicker on video switch/loop: the canvas was cleared to black with
+  GDI, which doesn't stick on Win11 layered canvases (transparent →
+  original wallpaper flashed). The previous frame now stays until the
+  new first frame arrives; mpv keeps the last frame open (`keep-open`)
+  and uses hardware decoding (`hwdec=auto-safe`).
+
+## [1.2.1] - 2026-10-14
+
+### Fixed
+- Release/CI builds linked the playback library as `mpv-2.dll` while
+  the shipped file is `libmpv-2.dll` — the 1.2.0 exe died at startup
+  with "mpv-2.dll missing". The import name is verified in CI now.
+  (Updating from ≤1.1.7 still needs one manual step: place
+  `libmpv-2.dll` from the release next to the exe, or use the
+  installer — the old updater doesn't know about the DLL yet.)
+
+## [1.2.0] - 2026-10-14
+
+### Added
+- In-process video playback via libmpv (`wallmotion-mpv` crate):
+  no mpv install needed, `libmpv-2.dll` ships next to the exe
+  (installer includes it; the in-app updater fetches it when missing).
+- Linux `.deb` now depends on `libmpv2` from the distro.
+
+### Changed
+- Playback backend rewritten: end-of-file and first-frame arrive as
+  player events — the sidecar processes, JSON IPC pipes, brightness
+  probe and sync thread are gone.
+- Players are terminated before teardown (a bare drop left the old
+  video playing as a ghost over the new one).
+
+### Removed
+- The `wallmotion-player` mpv sidecar crate and the "mpv not found"
+  message; `mpv` is no longer searched on PATH.
+
 ## [1.1.7] - 2026-10-13
 
 ### Added

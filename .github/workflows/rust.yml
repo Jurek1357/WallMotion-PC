@@ -25,11 +25,65 @@ jobs:
         with:
           components: clippy
 
+      # Linux system deps: GUI stack (also fixes the pre-existing
+      # ubuntu glib-sys build failure) + libmpv for in-process playback.
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev dpkg-dev liblzma-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
+          sudo apt-get install -y libmpv-dev
+
+      # MSVC links mpv.lib: generated from the DLL's exports (shinchiro
+      # ships only a MinGW import lib). Pinned dev package; bump with mpv.
+      - name: Install mpv dev files (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          curl.exe -L --fail --retry 5 --retry-delay 15 --retry-all-errors -o mpv-dev.7z https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-v3-20261011-git-accb7b2821.7z
+          7z x mpv-dev.7z -odeps/mpv-dev include libmpv-2.dll libmpv.dll.a -y
+          if (!(Test-Path 'deps/mpv-dev/libmpv-2.dll')) { throw 'DLL missing after extract' }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'vswhere found no VS with VC tools' }
+          $bindir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { "$($_.FullName)\bin\Hostx64\x64" }
+          $dumpbin = Join-Path $bindir 'dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw "dumpbin missing: $dumpbin" }
+          $out = & $dumpbin /exports 'deps/mpv-dev/libmpv-2.dll'
+          $exports = $out | Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' | ForEach-Object { $_.Matches.Groups[1].Value } | Where-Object { $_ -like 'mpv_*' } | Sort-Object -Unique
+          Write-Host "mpv exports found: $($exports.Count)"
+          if ($exports.Count -lt 50) { $out | Select-Object -First 25 | Write-Host; throw 'too few mpv exports parsed' }
+          # NOTE: LIBRARY must be the real file name (libmpv-2.dll):
+          # anything else links an exe that can't find its DLL at startup.
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $exports | Set-Content mpv.def -Encoding Ascii
+          & (Join-Path $bindir 'lib.exe') /def:mpv.def /out:deps/mpv-dev/mpv.lib /machine:x64
+          if ($LASTEXITCODE -ne 0) { throw "lib.exe failed: $LASTEXITCODE" }
+          $lib = Get-Item 'deps/mpv-dev/mpv.lib'
+          Write-Host "mpv.lib bytes: $($lib.Length)"
+          if ($lib.Length -lt 10000) { throw 'mpv.lib suspiciously small' }
+
       - name: Format check
         run: cargo fmt --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
+      # Windows test binaries that link libmpv-2.dll die at startup with
+      # STATUS_DLL_NOT_FOUND even with the DLL next to them and on PATH
+      # (cause still open — sibling binaries without the import run fine).
+      # Ubuntu runs the FULL suite against system libmpv, so coverage is
+      # preserved there; Windows still compiles everything (clippy -D
+      # warnings above) and tests the rest.
+      - name: Test (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\deps\mpv-dev;$env:PATH"
+          cargo build --tests --workspace
+          cargo test --workspace --exclude wallmotion-mpv --exclude wallmotion-settings
+
+      - name: Test (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: cargo test --workspace

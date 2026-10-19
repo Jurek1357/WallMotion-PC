@@ -67,9 +67,9 @@ Priorities: **P1** = do first (unblocks everything else), **P2** = next,
   the project rule: no emojis in UI.
 - [x] **Wallpaper rotation/scheduling** — playlist of local images/videos,
   interval switcher with shuffle, persisted queue.
-- [ ] **libmpv decode engine** — kills the H.264-only ceiling (AV1/VP9) and
-  unifies Windows + Linux render paths. Evaluate when AV1 YouTube content
-  becomes annoying.
+- [x] **libmpv decode engine** — in-process playback via `wallmotion-mpv`
+  (`wid` embed, events instead of sidecar/IPC/probe). AV1/VP9 unlock is a
+  downloader-filter follow-up, not done yet.
 - [x] **CLI interface** — `wallmotion --set file.mp4`, `--stop`, `--mute`.
   Single-instance forwarding to the running app, weekly update check
   with tray notice.
@@ -86,8 +86,9 @@ Priorities: **P1** = do first (unblocks everything else), **P2** = next,
   all unit-tested, no-dependency `wallmotion-core`.
 - [x] **Windows render:** WorkerW discovery, GDI canvas, cover-fit static
   images, per-monitor + virtual-screen targets, fullscreen/battery sensors.
-- [x] **Playback:** mpv sidecar (`--wid`) + JSON IPC pause/mute/volume,
-  no console popups (`CREATE_NO_WINDOW` everywhere).
+- [x] **Playback:** in-process libmpv (`wallmotion-mpv` crate, `wid`
+  embed, pause/mute/volume as properties, EndOfFile/PlaybackRestart
+  events) — no sidecar processes, no IPC pipes, no brightness probe.
 - [x] **Settings window (egui):** tabs Settings / Wallpaper library
   (Lively-style grid, search, favorites, detail, double-click to set),
   CZ/EN (shared `locales/*.json`), light/dark + follow-system, brand
@@ -101,9 +102,8 @@ Priorities: **P1** = do first (unblocks everything else), **P2** = next,
   `WallMotion-Settings.exe` next to the AppImage (Python exe dropped
   from v1.1.0 assets; stays in older releases).
 - [ ] **Still missing vs Python:** autostart toggle, update check,
-  drag & drop file, Linux render backends for the native binary,
-  static `libmpv` link instead of the mpv sidecar.
-- [ ] **Then:** workshop index, code signing, libmpv evaluation
+  drag & drop file, Linux render backends for the native binary.
+- [ ] **Then:** workshop index, code signing
   (same P3 items as above).
 
 ## Done

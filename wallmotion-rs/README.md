@@ -12,9 +12,8 @@ Control today.
 | `core`: platform paths (XDG/Windows) + session detection, tested | ✅ done |
 | `win`: WorkerW discovery + canvas create/z-order, tested (incl. live smoke test) | ✅ done |
 | `demo`: animated test pattern behind desktop icons (`cargo run -p wallmotion-demo`) | ✅ done |
-| `player`: mpv sidecar in our window (`--wid`) + JSON IPC pause/mute/volume, live-tested | ✅ done |
+| `mpv`: in-process libmpv playback (`wid` embed, property control, events), live-tested | ✅ done |
 | Settings UI shell (Tauri or `egui`) reusing this core | next |
-| Static `libmpv` link instead of the sidecar binary | later |
 
 ## Notes
 

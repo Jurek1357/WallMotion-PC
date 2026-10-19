@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- GitHub release notes are now composed automatically at tag time:
+  static platform blurb + the matching version section from this
+  `CHANGELOG.md` (no more manual `gh release edit` afterwards).
+
 ## [1.2.6] - 2026-10-16
 
 ### Added

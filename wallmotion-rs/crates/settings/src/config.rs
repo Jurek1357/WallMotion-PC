@@ -59,6 +59,10 @@ pub struct AppConfig {
     /// Release tag the user skipped ("don't offer this one again").
     #[serde(default)]
     pub update_skipped: String,
+    /// YouTube download codec (`"h264"`/`"av1"`). Same key shape for a
+    /// future Python parity; unknown codes fall back to H.264.
+    #[serde(default = "default_yt_codec")]
+    pub yt_codec: String,
 }
 
 /// Rotation playlist state for serde. Validation (interval whitelist)
@@ -145,6 +149,10 @@ fn default_theme() -> String {
     "dark".to_string()
 }
 
+fn default_yt_codec() -> String {
+    "h264".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -162,6 +170,7 @@ impl Default for AppConfig {
             theme_follow_system: false,
             update_checked_at: 0,
             update_skipped: String::new(),
+            yt_codec: default_yt_codec(),
         }
     }
 }
@@ -223,6 +232,7 @@ mod tests {
             theme_follow_system: false,
             update_checked_at: 0,
             update_skipped: String::new(),
+            yt_codec: default_yt_codec(),
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);

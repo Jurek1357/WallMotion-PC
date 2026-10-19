@@ -135,13 +135,33 @@ pub fn ytdlp_version(exe: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// `ffmpeg -decoders` lists an AV1 decoder (dav1d/aom/native)?
+/// `None` when ffmpeg won't run (unknown — let the user try anyway).
+pub fn ffmpeg_supports_av1(exe: &Path) -> Option<bool> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["-hide_banner", "-decoders"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    hide_console(&mut cmd);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(yt::decoders_has_av1(&String::from_utf8_lossy(&out.stdout)))
+}
+
 /// Spawn a single-video download on a background thread.
 /// Streams `--newline` progress as [`YtEvent::Progress`].
+/// Eight args mirror the old positional style (CI denies warnings,
+/// so the count is allow-listed instead of refactored).
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_download(
     ytdlp: PathBuf,
     url: String,
     out_dir: PathBuf,
     ffmpeg: Option<PathBuf>,
+    codec: yt::VideoCodec,
     slot: ChildSlot,
     cancel: Arc<AtomicBool>,
     tx: Sender<YtEvent>,
@@ -151,7 +171,7 @@ pub fn spawn_download(
             .as_ref()
             .and_then(|p| p.parent().map(|d| d.to_string_lossy().into_owned()));
         let template = format!("{}/%(id)s.%(ext)s", out_dir.to_string_lossy());
-        let mut args = yt::download_args(&template, ffmpeg_dir.as_deref());
+        let mut args = yt::download_args(&template, ffmpeg_dir.as_deref(), codec);
         args.push(url.clone());
         let video_id = yt::extract_video_id(&url);
         let mut cmd = std::process::Command::new(&ytdlp);

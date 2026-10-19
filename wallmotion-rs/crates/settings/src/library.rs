@@ -8,13 +8,14 @@
 
 use std::path::{Path, PathBuf};
 
-/// Video extensions (lowercase, with dot).
+/// Video extensions (lowercase, with dot). GIF rides along: mpv/ffmpeg
+/// decodes it animated, so it plays as video, not a still image.
 pub const VIDEO_EXTS: &[&str] = &[
-    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".ogv", ".ts",
+    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".ogv", ".ts", ".gif",
 ];
 
 /// Image extensions (lowercase, with dot).
-pub const IMAGE_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"];
+pub const IMAGE_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp"];
 
 /// Thumbnail width in pixels; height follows the aspect ratio.
 pub const THUMB_WIDTH: u32 = 320;

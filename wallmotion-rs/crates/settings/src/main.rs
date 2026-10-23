@@ -282,7 +282,7 @@ struct RunningVideo {
     canvas: isize,
     /// Monitor geometry the canvas was built for (stale on monitor
     /// change → next switch rebuilds the canvas).
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     rect: (i32, i32, i32, i32),
     /// Only the first runner plays audio; the rest stay muted (one
     /// video on every monitor must not echo).

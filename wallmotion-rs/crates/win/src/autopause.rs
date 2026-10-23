@@ -1,8 +1,8 @@
-//! Windows autopause sensors: fullscreen foreground window + battery.
+//! Autopause sensors: fullscreen active window + battery.
 //!
-//! Thin wrappers over Win32; the pause decision + hysteresis live in
-//! `wallmotion-core::autopause` (pure, unit-tested). Mirrors the sensor
-//! half of `wallmotion/autopause.py`.
+//! Thin wrappers over Win32 / X11; the pause decision + hysteresis live
+//! in `wallmotion-core::autopause` (pure, unit-tested). Mirrors the
+//! sensor half of `wallmotion/autopause.py`.
 
 /// Shell windows that are never a "fullscreen app" (desktop itself).
 #[cfg(windows)]
@@ -62,6 +62,14 @@ pub fn is_fullscreen_app_active() -> bool {
         }
         false
     }
+}
+
+/// True when the active X11 window exactly covers its monitor.
+/// False on any sensor failure (fail-open: keep playing).
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn is_fullscreen_app_active() -> bool {
+    crate::x11::with_conn(|x11, screen| Some(crate::x11::fullscreen_active(&x11.conn, screen)))
+        .unwrap_or(false)
 }
 
 /// True when running on battery power. False on desktops / unknown.

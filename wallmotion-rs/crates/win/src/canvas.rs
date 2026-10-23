@@ -700,3 +700,185 @@ pub mod sys {
         }
     }
 }
+
+// Linux/X11 backend: an override-redirect window pinned to the desktop
+// layer. The window manager is bypassed (override_redirect) and the
+// desktop hints keep it out of taskbars/pagers; mpv paints into its
+// window id (`wid`), same as on Windows.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod sys {
+    use super::WallpaperCanvas;
+    use crate::x11;
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{
+        AtomEnum, ConfigureWindowAux, ConnectionExt, CreateWindowAux, EventMask, PropMode,
+        StackMode, WindowClass,
+    };
+    use x11rb::wrapper::ConnectionExt as _;
+    use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
+
+    /// One display monitor (same shape as the Windows backend).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct MonitorInfo {
+        pub name: String,
+        pub rect: (i32, i32, i32, i32),
+        pub primary: bool,
+    }
+
+    /// All monitors via RandR; single-screen fallback when unavailable.
+    pub fn list_monitors() -> Vec<MonitorInfo> {
+        x11::with_conn(|x11, screen| {
+            Some(
+                x11::monitors(&x11.conn, screen)
+                    .into_iter()
+                    .map(|m| MonitorInfo {
+                        name: m.name,
+                        rect: m.rect,
+                        primary: m.primary,
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+    }
+
+    /// Virtual screen geometry (x, y, w, h) spanning all monitors.
+    pub fn virtual_screen() -> (i32, i32, i32, i32) {
+        x11::with_conn(|x11, screen| Some(x11::virtual_screen(&x11.conn, screen)))
+            .unwrap_or((0, 0, 1, 1))
+    }
+
+    /// Create an override-redirect desktop window over (x, y, w, h).
+    pub fn setup_wallpaper_canvas(x: i32, y: i32, w: i32, h: i32) -> Option<WallpaperCanvas> {
+        x11::with_conn(|x11, screen| {
+            let conn = &x11.conn;
+            let win = conn.generate_id().ok()?;
+            let aux = CreateWindowAux::new()
+                .background_pixel(screen.black_pixel)
+                .event_mask(EventMask::EXPOSURE | EventMask::STRUCTURE_NOTIFY)
+                .override_redirect(1u32);
+            conn.create_window(
+                COPY_DEPTH_FROM_PARENT,
+                win,
+                screen.root,
+                x as i16,
+                y as i16,
+                w.max(1) as u16,
+                h.max(1) as u16,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                COPY_FROM_PARENT,
+                &aux,
+            )
+            .ok()?;
+            // Desktop window type + sticky/below/skip hints. The canvas
+            // stays out of alt-tab, taskbars and pagers, and is pinned
+            // below every normal window.
+            let type_atom = x11::atom(conn, "_NET_WM_WINDOW_TYPE")?;
+            let desktop = x11::atom(conn, "_NET_WM_WINDOW_TYPE_DESKTOP")?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win,
+                type_atom,
+                AtomEnum::ATOM,
+                &[desktop],
+            )
+            .ok()?;
+            let state_atom = x11::atom(conn, "_NET_WM_STATE")?;
+            let below = x11::atom(conn, "_NET_WM_STATE_BELOW")?;
+            let sticky = x11::atom(conn, "_NET_WM_STATE_STICKY")?;
+            let skip_task = x11::atom(conn, "_NET_WM_STATE_SKIP_TASKBAR")?;
+            let skip_pager = x11::atom(conn, "_NET_WM_STATE_SKIP_PAGER")?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win,
+                state_atom,
+                AtomEnum::ATOM,
+                &[below, sticky, skip_task, skip_pager],
+            )
+            .ok()?;
+            let desktop_atom = x11::atom(conn, "_NET_WM_DESKTOP")?;
+            // 0xFFFFFFFF = all desktops.
+            conn.change_property32(
+                PropMode::REPLACE,
+                win,
+                desktop_atom,
+                AtomEnum::CARDINAL,
+                &[u32::MAX],
+            )
+            .ok()?;
+            conn.map_window(win).ok()?;
+            conn.configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::BELOW))
+                .ok()?;
+            conn.flush().ok()?;
+            Some(WallpaperCanvas {
+                canvas: win as isize,
+                workerw: 0,
+                raised: false,
+            })
+        })
+    }
+
+    /// Destroy a canvas created by [`setup_wallpaper_canvas`].
+    pub fn destroy_canvas(canvas: isize) -> bool {
+        x11::with_conn(|x11, _| {
+            let ok = x11.conn.destroy_window(canvas as u32).is_ok();
+            let _ = x11.conn.flush();
+            Some(ok)
+        })
+        .unwrap_or(false)
+    }
+
+    /// Show or hide a canvas without destroying it (pre-roll warmup).
+    pub fn set_canvas_visible(canvas: isize, visible: bool) -> bool {
+        x11::with_conn(|x11, _| {
+            let win = canvas as u32;
+            let ok = if visible {
+                x11.conn.map_window(win).is_ok()
+            } else {
+                x11.conn.unmap_window(win).is_ok()
+            };
+            let _ = x11.conn.flush();
+            Some(ok)
+        })
+        .unwrap_or(false)
+    }
+
+    /// Keep the canvases stacked at the bottom of the root window in
+    /// the given order (first on top of the others).
+    pub fn ensure_canvases_stacked(canvases: &[isize]) -> bool {
+        if canvases.is_empty() {
+            return true;
+        }
+        x11::with_conn(|x11, _| {
+            for &c in canvases {
+                if c == 0 {
+                    continue;
+                }
+                let _ = x11.conn.configure_window(
+                    c as u32,
+                    &ConfigureWindowAux::new().stack_mode(StackMode::BELOW),
+                );
+            }
+            let _ = x11.conn.flush();
+            Some(true)
+        })
+        .unwrap_or(false)
+    }
+
+    /// X11 has no desktop icon view (DefView) to be ordered against.
+    pub fn canvas_below_defview(_canvas: isize) -> bool {
+        true
+    }
+
+    /// One-line desktop state for swap diagnosis. Best effort.
+    pub fn debug_desktop_tree() -> String {
+        x11::with_conn(|x11, screen| {
+            Some(format!(
+                "x11 screen={} root={:x} {}x{}",
+                x11.screen_num, screen.root, screen.width_in_pixels, screen.height_in_pixels
+            ))
+        })
+        .unwrap_or_else(|| "x11=?".to_string())
+    }
+}

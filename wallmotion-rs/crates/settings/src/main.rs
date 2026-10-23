@@ -473,12 +473,12 @@ impl LibType {
 struct MonitorChoice {
     name: String,
     label: String,
-    // Geometry for canvas placement (windows-gated readers only).
+    // Geometry for canvas placement (Windows/X11 readers).
     #[allow(dead_code)]
     rect: Option<(i32, i32, i32, i32)>,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn monitor_label(
     lang: i18n::Lang,
     name: &str,
@@ -500,9 +500,7 @@ fn monitor_label(
 }
 
 fn discover_monitors(lang: i18n::Lang) -> Vec<MonitorChoice> {
-    // Non-Windows builds list no monitors; keep the param used.
-    let _ = lang;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         wallmotion_win::canvas::sys::list_monitors()
             .into_iter()
@@ -516,18 +514,19 @@ fn discover_monitors(lang: i18n::Lang) -> Vec<MonitorChoice> {
             })
             .collect()
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
+        let _ = lang;
         vec![]
     }
 }
 
 fn poll_fullscreen() -> bool {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         wallmotion_win::autopause::is_fullscreen_app_active()
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         false
     }
@@ -542,6 +541,16 @@ fn poll_battery() -> bool {
     {
         wallmotion_core::autopause::is_on_battery_linux()
     }
+}
+
+/// True when the app runs in a Wayland session. The desktop canvas is an
+/// X11 override-redirect window; under Wayland/XWayland it would float
+/// above normal windows instead of sitting behind the icons, so playback
+/// is refused with a clear message.
+#[cfg(target_os = "linux")]
+fn wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
 }
 
 /// Reveal a folder in the system file manager. Best effort.
@@ -2540,13 +2549,29 @@ impl App {
         // Per-file volume memory (mirrors Python `_apply_volume_memory`).
         self.apply_volume_memory();
         if is_image_path(&self.file) {
-            // Static wallpaper first (it lands behind the video canvas),
-            // then teardown: no flash of the original background.
-            self.set_image(&path);
-            let img_status = self.status.clone();
-            self.stop_video();
-            self.status = img_status;
-            return;
+            #[cfg(windows)]
+            {
+                // Static wallpaper first (it lands behind the video canvas),
+                // then teardown: no flash of the original background.
+                self.set_image(&path);
+                let img_status = self.status.clone();
+                self.stop_video();
+                self.status = img_status;
+                return;
+            }
+            // X11: images go through the same canvas + mpv path; mpv
+            // loops them (see `launch_video`) so the interval timer in
+            // `rotation_tick` stays in charge.
+            #[cfg(target_os = "linux")]
+            {
+                if self.any_running() {
+                    self.switch_video(path);
+                } else {
+                    self.stop_video();
+                    self.set_video(path);
+                }
+                return;
+            }
         }
         if self.any_running() {
             self.switch_video(path);
@@ -2556,7 +2581,7 @@ impl App {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn selected_rect(&self) -> (i32, i32, i32, i32) {
         if self.monitor.is_empty() {
             return wallmotion_win::canvas::sys::virtual_screen();
@@ -2587,13 +2612,8 @@ impl App {
         }
     }
 
-    #[cfg(not(windows))]
-    fn set_image(&mut self, _path: &std::path::Path) {
-        self.status = i18n::tr(self.lang, "no_canvas");
-    }
-
     /// "Playing behind icons (WxH at X,Y on M)" status line.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn video_status(&self) -> String {
         let where_tag = if self.monitor.is_empty() {
             i18n::tr(self.lang, "monitor_all")
@@ -2618,9 +2638,8 @@ impl App {
     /// touching the current playback. The caller adopts the runner, or
     /// destroys a freshly built canvas on failure. Err = localized
     /// status text.
-    /// Windows-only callers (other platforms report `no_canvas`
-    /// without spawning): silence the Linux dead-code lint.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Other platforms report `no_canvas` without spawning.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn launch_video(
         &mut self,
         canvas: isize,
@@ -2629,7 +2648,7 @@ impl App {
         muted: bool,
         audible: bool,
     ) -> Result<RunningVideo, String> {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         {
             let player = match wallmotion_mpv::Player::open(canvas) {
                 Ok(p) => p,
@@ -2637,7 +2656,10 @@ impl App {
             };
             // Rotation mode plays without loop: EndOfFile advances the
             // playlist (same contract the exiting sidecar used to give).
-            let loop_file = !(self.rotation_enabled && !self.rotation.is_empty());
+            // Still images always loop: on X11 they are played by mpv
+            // too, and `rotation_tick` advances them on the interval.
+            let loop_file = is_image_path(&path.to_string_lossy())
+                || !(self.rotation_enabled && !self.rotation.is_empty());
             if let Err(e) = player.set_muted(muted) {
                 return Err(i18n::trf(self.lang, "mpv_failed", &[("e", &e)]));
             }
@@ -2658,7 +2680,7 @@ impl App {
                 Err(e) => Err(i18n::trf(self.lang, "mpv_failed", &[("e", &e)])),
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         {
             let _ = (canvas, rect, path, muted, audible);
             Err(i18n::tr(self.lang, "no_canvas"))
@@ -2672,7 +2694,7 @@ impl App {
     /// Target canvas rects: one per selected monitor (same video on
     /// each), or the whole virtual screen when the monitor list is
     /// unavailable. `monitor` empty = all monitors.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn target_rects(&self) -> Vec<(i32, i32, i32, i32)> {
         if !self.monitor.is_empty() {
             if let Some(m) = self.monitors.iter().find(|m| m.name == self.monitor) {
@@ -2708,7 +2730,7 @@ impl App {
         }
         // Preroll iff the monitor layout is unchanged (same rects, same
         // order); the old runners stay put until the swap.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let reuse = {
             let mut olds: Vec<(i32, i32, i32, i32)> = vec![];
             if let Some(ref run) = self.running {
@@ -2717,7 +2739,7 @@ impl App {
             olds.extend(self.extra.iter().map(|r| r.rect));
             olds == self.target_rects()
         };
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let reuse = false;
         if !reuse {
             if let Some(run) = self.running.take() {
@@ -2734,9 +2756,9 @@ impl App {
         // Double-buffered: the successor warms up on hidden canvases
         // while the old video keeps playing; the swap happens on the
         // first frame (see `commit_preroll`), so there is no gap.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         self.begin_preroll(path);
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let _ = path;
     }
 
@@ -2745,9 +2767,9 @@ impl App {
     fn drop_pending(&mut self) {
         for run in self.pending.drain(..) {
             run.player.terminate();
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             wallmotion_win::canvas::sys::destroy_canvas(run.canvas);
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "linux")))]
             let _ = run.canvas;
         }
         self.pending_deadline = None;
@@ -2756,9 +2778,9 @@ impl App {
     /// Start the successor video on fresh hidden canvases (one per
     /// monitor rect). Old runners keep playing until `commit_preroll`.
     /// Replaces any in-flight preroll; falls back to keeping the old
-    /// video when nothing could start. Windows only (other platforms
-    /// never reach here — `reuse` is false there).
-    #[cfg(windows)]
+    /// video when nothing could start. Canvas platforms only (other
+    /// platforms never reach here — `reuse` is false there).
+    #[cfg(any(windows, target_os = "linux"))]
     fn begin_preroll(&mut self, path: PathBuf) {
         use wallmotion_win::canvas::sys as canvas;
         self.drop_pending();
@@ -2822,8 +2844,8 @@ impl App {
     /// Swap prerolled runners in: show the warmed-up canvases stacked
     /// below the icons, then reap the predecessors. Called once every
     /// canvas painted (or on the 3 s deadline — same contract as the
-    /// first-frame sync). Windows only.
-    #[cfg(windows)]
+    /// first-frame sync). Canvas platforms only.
+    #[cfg(any(windows, target_os = "linux"))]
     fn commit_preroll(&mut self) {
         use wallmotion_win::canvas::sys as canvas;
         if self.pending.is_empty() {
@@ -2874,13 +2896,18 @@ impl App {
     /// Two phases so all mpvs start back-to-back and warm up in
     /// parallel: canvases first, spawns second.
     fn set_video(&mut self, path: PathBuf) {
+        #[cfg(target_os = "linux")]
+        if wayland_session() {
+            self.status = i18n::tr(self.lang, "linux_x11_only");
+            return;
+        }
         if let Some(run) = self.running.take() {
             reap_runner(run);
         }
         for run in self.extra.drain(..) {
             reap_runner(run);
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         {
             use wallmotion_win::canvas::sys as canvas;
             // Phase 1: canvases (window setup can reshuffle the desktop).
@@ -2931,7 +2958,7 @@ impl App {
                 self.arm_sync();
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         {
             let _ = path;
             self.status = i18n::tr(self.lang, "no_canvas");
@@ -2954,8 +2981,8 @@ impl App {
     /// releases them together once every canvas painted (or the 3 s
     /// deadline). Honors a pause the user hits meanwhile (captured
     /// here, same as the old probe thread did).
-    /// Windows-only caller (same reason as `launch_video`).
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Windows/X11-only caller (same reason as `launch_video`).
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn arm_sync(&mut self) {
         for run in self.running.iter_mut().chain(self.extra.iter_mut()) {
             run.painted = false;
@@ -3237,7 +3264,7 @@ impl eframe::App for App {
         self.rotation_tick();
         // Preroll swap: all hidden canvases painted (or the deadline
         // passed) — show them and reap the predecessors.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         {
             let ready = !self.pending.is_empty()
                 && (self.pending.iter().all(|run| run.painted)
@@ -3256,7 +3283,7 @@ impl eframe::App for App {
         if self.any_running() && self.last_zcheck.elapsed() >= std::time::Duration::from_millis(500)
         {
             self.last_zcheck = std::time::Instant::now();
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 use wallmotion_win::canvas::sys as canvas;
                 // Stack all canvases (primary + extra monitors) below
@@ -3362,9 +3389,9 @@ fn accent_color(dark: bool) -> egui::Color32 {
 /// The player is terminated first — see `Player::terminate`.
 fn reap_runner(run: RunningVideo) {
     run.player.terminate();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     wallmotion_win::canvas::sys::destroy_canvas(run.canvas);
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     let _ = run.canvas;
 }
 

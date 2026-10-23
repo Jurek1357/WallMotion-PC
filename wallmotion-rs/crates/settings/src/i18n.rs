@@ -64,6 +64,10 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
                 "Auto-paused (fullscreen app or battery).",
             ),
             ("no_canvas", "No desktop canvas (run on Windows)."),
+            (
+                "linux_x11_only",
+                "Linux: X11 session required (Wayland is not supported yet).",
+            ),
             ("mpv_failed", "mpv failed to start: {e}"),
             ("yt_url_first", "Paste a YouTube link first."),
             ("yt_need_tool", "yt-dlp not found — click Get yt-dlp below."),
@@ -191,6 +195,10 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
                 "Auto-pauza (fullscreen aplikace nebo baterie).",
             ),
             ("no_canvas", "Nenalezeno plátno plochy (spusť ve Windows)."),
+            (
+                "linux_x11_only",
+                "Linux: vyžaduje relaci X11 (Wayland zatím není podporován).",
+            ),
             ("mpv_failed", "mpv se nepodařilo spustit: {e}"),
             ("yt_url_first", "Nejřív vlož YouTube odkaz."),
             (

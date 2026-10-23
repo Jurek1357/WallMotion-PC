@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-10-23
+
+### Added
+- Global media hotkeys: Ctrl+Alt+←/→ skips to the previous/next
+  rotation wallpaper, Ctrl+Alt+Space toggles pause and Ctrl+Alt+M
+  toggles mute. They are registered on a background thread, so they
+  also work while the window is hidden in the tray. A "Shortcuts"
+  button in the header opens a cheat-sheet window listing them.
+
 ## [1.2.7] - 2026-10-19
 
 ### Added

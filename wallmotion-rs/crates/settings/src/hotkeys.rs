@@ -13,6 +13,10 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 /// One physical shortcut press, reduced to what the app should do.
+///
+/// On non-Windows targets nothing ever constructs these (the hotkey
+/// worker is a stub), but the UI still matches on them.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyAction {
     Next,

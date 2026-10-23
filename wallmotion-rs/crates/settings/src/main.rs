@@ -13,6 +13,7 @@ use std::path::PathBuf;
 mod autostart;
 mod cli;
 mod config;
+mod hotkeys;
 mod i18n;
 mod instance;
 mod library;
@@ -327,6 +328,9 @@ struct App {
     last_poll: std::time::Instant,
     last_zcheck: std::time::Instant,
     remote_rx: Option<std::sync::mpsc::Receiver<String>>,
+    hotkeys: hotkeys::Hotkeys,
+    hotkeys_attached: bool,
+    show_hotkeys: bool,
     pending_start: bool,
     rotation: wallmotion_core::rotation::RotationQueue,
     rotation_enabled: bool,
@@ -595,6 +599,9 @@ impl Default for App {
             pending: vec![],
             pending_deadline: None,
             remote_rx: None,
+            hotkeys: hotkeys::Hotkeys::start(),
+            hotkeys_attached: false,
+            show_hotkeys: false,
             pending_start: false,
             rotation_enabled: saved.rotation.enabled,
             rotation_interval: interval,
@@ -1177,6 +1184,55 @@ impl App {
             egui::FontId::proportional(20.0),
             egui::Color32::WHITE,
         );
+    }
+
+    /// Floating cheat-sheet with the global shortcuts, opened from the
+    /// header button. Escape or the X closes it.
+    fn hotkeys_window(&mut self, ctx: &egui::Context) {
+        if !self.show_hotkeys {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new(i18n::tr(self.lang, "hotkeys_title"))
+            .id(egui::Id::new("wallmotion-hotkeys-window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                let rows = [
+                    ("Ctrl + Alt + Right", "hotkeys_action_next"),
+                    ("Ctrl + Alt + Left", "hotkeys_action_prev"),
+                    ("Ctrl + Alt + Space", "hotkeys_action_pause"),
+                    ("Ctrl + Alt + M", "hotkeys_action_mute"),
+                ];
+                ui.add_space(2.0);
+                egui::Grid::new("wallmotion-hotkeys-grid")
+                    .num_columns(2)
+                    .spacing([18.0, 8.0])
+                    .show(ui, |ui| {
+                        for (combo, key) in rows {
+                            ui.label(egui::RichText::new(combo).strong().monospace());
+                            ui.label(i18n::tr(self.lang, key));
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new(i18n::tr(self.lang, "hotkeys_works_hidden")).weak());
+                if self.hotkeys.registered() == 0 {
+                    ui.label(
+                        egui::RichText::new(i18n::tr(self.lang, "hotkeys_failed"))
+                            .color(egui::Color32::from_rgb(0xE0, 0x7A, 0x5F)),
+                    );
+                }
+                ui.add_space(8.0);
+                if ui.button(i18n::tr(self.lang, "hotkeys_close")).clicked() {
+                    self.show_hotkeys = false;
+                }
+            });
+        if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_hotkeys = false;
+        }
     }
 
     /// One rotation tick. Timer-driven (videos loop, so unlike Python
@@ -2933,6 +2989,33 @@ impl eframe::App for App {
             self.quit_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        // Global media hotkeys (Ctrl+Alt+arrows / Space / M). Work even
+        // with the window hidden; the worker requested a repaint.
+        if !self.hotkeys_attached {
+            self.hotkeys.attach_ctx(ctx);
+            self.hotkeys_attached = true;
+        }
+        for action in self.hotkeys.drain() {
+            match action {
+                hotkeys::HotkeyAction::Next => {
+                    if let Some(path) = self.rotation.next_file() {
+                        self.play_rotation_path(path);
+                    }
+                }
+                hotkeys::HotkeyAction::Prev => {
+                    if let Some(path) = self.rotation.prev_file() {
+                        self.play_rotation_path(path);
+                    }
+                }
+                hotkeys::HotkeyAction::Pause => self.toggle_pause(),
+                hotkeys::HotkeyAction::Mute => {
+                    self.muted = !self.muted;
+                    self.apply_mute_volume();
+                    self.persist();
+                }
+            }
+            ctx.request_repaint();
+        }
         // Remote CLI commands from later invocations (single instance).
         let pending: Vec<String> = self
             .remote_rx
@@ -3080,6 +3163,13 @@ impl eframe::App for App {
                             self.lang = self.lang.toggle();
                             self.persist();
                         }
+                        if ui
+                            .button(i18n::tr(self.lang, "hotkeys_short"))
+                            .on_hover_text(i18n::tr(self.lang, "hotkeys_title"))
+                            .clicked()
+                        {
+                            self.show_hotkeys = true;
+                        }
                     });
                 });
                 ui.horizontal(|ui| {
@@ -3204,6 +3294,8 @@ impl eframe::App for App {
             self.last_poll = std::time::Instant::now();
             self.autopause_tick();
         }
+        // Shortcuts cheat-sheet window (opened from the header button).
+        self.hotkeys_window(ctx);
         // Keep the loop alive while minimized to tray: without a
         // periodic repaint, update() never runs and tray clicks die.
         // 50ms keeps the menu snappy at negligible idle cost.

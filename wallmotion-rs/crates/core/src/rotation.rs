@@ -213,6 +213,30 @@ impl RotationQueue {
         self.next_file()
     }
 
+    /// Mirror of [`Self::next_file`] for walking backwards. Without
+    /// repeat the queue stops at the first item (the first wallpaper
+    /// stays on); with repeat it wraps around to the last one.
+    pub fn prev_file(&mut self) -> Option<String> {
+        if self.files.is_empty() || self.order.is_empty() {
+            return None;
+        }
+        if self.index < 0 {
+            self.index = 0;
+        }
+        if !self.repeat && self.index == 0 {
+            let first = self.files[self.order[0]].clone();
+            return Self::exists(&first).then_some(first);
+        }
+        for _ in 0..self.order.len() {
+            self.index = (self.index - 1).rem_euclid(self.order.len() as i64);
+            let path = self.files[self.order[self.index as usize]].clone();
+            if Self::exists(&path) {
+                return Some(path);
+            }
+        }
+        None
+    }
+
     /// Snap the cursor onto the given file (if listed) so rotation
     /// continues *after* it. Manual picks don't move the cursor, so
     /// enabling rotation mid-playlist would otherwise advance from a
@@ -285,6 +309,31 @@ mod tests {
         let last = q.next_file().unwrap();
         assert_eq!(last, files[files.len() - 1]);
         assert_eq!(q.next_file().as_deref(), Some(last.as_str()));
+    }
+
+    #[test]
+    fn prev_wraps_with_repeat() {
+        let (_dir, files) = fixture();
+        let mut q = RotationQueue::new(files.clone(), 0, false, true);
+        assert_eq!(q.prev_file().as_deref(), Some(files[2].as_str()));
+        assert_eq!(q.prev_file().as_deref(), Some(files[1].as_str()));
+    }
+
+    #[test]
+    fn prev_stops_at_start_without_repeat() {
+        let (_dir, files) = fixture();
+        let mut q = RotationQueue::new(files.clone(), 1, false, false);
+        assert_eq!(q.prev_file().as_deref(), Some(files[0].as_str()));
+        assert_eq!(q.prev_file().as_deref(), Some(files[0].as_str()));
+    }
+
+    #[test]
+    fn prev_skips_missing_files() {
+        let (dir, files) = fixture();
+        std::fs::remove_file(&files[2]).unwrap();
+        let mut q = RotationQueue::new(files.clone(), 0, false, true);
+        assert_eq!(q.prev_file().as_deref(), Some(files[1].as_str()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -1,0 +1,39 @@
+name: Linux preview deb
+
+# Builds a downloadable .deb for PRs so a Linux/X11 runtime test does not
+# need a public release first. Artifacts are kept for 7 days.
+on:
+  pull_request:
+    paths: ["wallmotion-rs/**", ".github/workflows/linux-preview.yml"]
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux GUI + deb deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev dpkg-dev liblzma-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
+          sudo apt-get install -y libmpv-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build deb (preview version)
+        run: cargo deb -p wallmotion-settings --deb-version "1.3.0~pr${{ github.event.number }}"
+        working-directory: wallmotion-rs
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: WallMotion-deb-pr${{ github.event.number }}
+          path: wallmotion-rs/target/debian/*.deb
+          if-no-files-found: error
+          retention-days: 7

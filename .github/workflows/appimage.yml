@@ -1,17 +1,21 @@
 name: AppImage
 
-# Linux packaging: PyInstaller onefile bundle wrapped as AppImage.
-# Runs on version tags (attaches the AppImage to the GitHub Release,
-# next to the Windows .exe) and manually via workflow_dispatch
-# (smoke test without publishing anything).
+# Linux packaging: the native Rust settings app (wallmotion-settings) in an
+# AppImage. Runs on version tags (attaches the AppImage to the GitHub Release)
+# and manually via workflow_dispatch (smoke test without publishing anything).
 #
-# Renderer tools are bundled into the AppImage so users need no manual
-# installs: mpv + feh come from apt, xwinwrap / swww / mpvpaper are built
-# from pinned sources, and linuxdeploy collects the shared libraries.
+# libmpv, ffmpeg and the GTK runtime are bundled, so the AppImage works
+# without distro packages (and without the legacy Python app).
 
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "wallmotion-rs/**"
+      - "installer/linux/**"
+      - "assets/icon.png"
+      - ".github/workflows/appimage.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,96 +23,65 @@ permissions:
 
 jobs:
   build-appimage:
-    runs-on: ubuntu-latest
+    # Keep this pinned: the runner's glibc is the minimum users need.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt pyinstaller
-
-      - name: Write version file
+      - name: Install native build deps
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "dev-${GITHUB_SHA::7}" > assets/VERSION
-          else
-            echo "${GITHUB_REF_NAME}" > assets/VERSION
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev liblzma-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libgtk-3-bin libxdo-dev
+          sudo apt-get install -y libgdk-pixbuf-2.0-dev librsvg2-dev libgirepository1.0-dev
+          sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
+          sudo apt-get install -y libmpv-dev ffmpeg
 
-      - name: Install Qt runtime + renderer build deps
-        run: >-
-          sudo apt-get update -qq && sudo apt-get install -y -qq
-          libgl1 libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libfreetype6
-          mpv feh x11-utils
-          libx11-dev pkg-config
-          meson ninja-build libmpv-dev libwayland-dev wayland-protocols
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Headless import smoke test
+      - name: Build native settings app
+        run: cargo build --release -p wallmotion-settings
+        working-directory: wallmotion-rs
+
+      - name: Assemble AppDir + build AppImage
+        env:
+          DEPLOY_GTK_VERSION: "3"
+          OUTPUT: WallMotion-x86_64.AppImage
         run: |
-          QT_QPA_PLATFORM=offscreen python -c "from wallmotion.platform.linux import describe_session; print(describe_session())"
-          QT_QPA_PLATFORM=offscreen python -m pytest tests/test_linux.py -q
-
-      - name: Build xwinwrap (X11 video renderer)
-        # ujjwal96/xwinwrap redirects to r00tdaemon - pin the canonical URL.
-        run: |
-          git clone --depth 1 https://github.com/r00tdaemon/xwinwrap /tmp/xwinwrap
-          make -C /tmp/xwinwrap
-
-      - name: Build mpvpaper (Wayland video renderer)
-        run: |
-          git clone --depth 1 --branch 1.9 https://github.com/GhostNaN/mpvpaper /tmp/mpvpaper
-          meson setup /tmp/mpvpaper-build /tmp/mpvpaper --prefix=/usr/local
-          ninja -C /tmp/mpvpaper-build
-          sudo ninja -C /tmp/mpvpaper-build install
-
-      - name: Install swww (wlroots image daemon)
-        # swww is not published on crates.io - build the pinned tag.
-        # The repo is a workspace, so both package names are required.
-        run: >-
-          cargo install --locked
-          --git https://github.com/LGFae/swww --tag v0.11.2
-          swww swww-daemon
-
-      - name: Build onefile bundle
-        run: >-
-          python -m PyInstaller --onefile --windowed --name WallMotion
-          --add-data "assets:assets" --add-data "locales:locales"
-          --noconfirm main.py
-
-      - name: Binary smoke test (--version needs no display)
-        run: ./dist/WallMotion --version
-
-      - name: Assemble AppDir with bundled renderers
-        run: |
-          cp assets/icon.png wallmotion.png
-          printf '%s\n' '[Desktop Entry]' 'Name=WallMotion' 'Exec=WallMotion' 'Icon=wallmotion' 'Type=Application' 'Categories=Utility;DesktopSettings;' > WallMotion.desktop
+          cp assets/icon.png wallmotion-settings.png
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O linuxdeploy
-          chmod +x linuxdeploy
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh -O linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy linuxdeploy-plugin-gtk.sh
+          EXTRA_LIBS=()
+          for lib in /usr/lib/x86_64-linux-gnu/libayatana-appindicator3.so.1 \
+                     /usr/lib/x86_64-linux-gnu/libappindicator3.so.1; do
+            if [ -e "$lib" ]; then EXTRA_LIBS+=(-l "$lib"); break; fi
+          done
           ./linuxdeploy --appdir AppDir \
-            -e dist/WallMotion \
-            -e /usr/bin/mpv -e /usr/bin/feh \
-            -e /tmp/xwinwrap/xwinwrap \
-            -e /usr/local/bin/mpvpaper \
-            -e "$HOME/.cargo/bin/swww" -e "$HOME/.cargo/bin/swww-daemon" \
-            -l /usr/lib/x86_64-linux-gnu/libwayland-client.so.0 \
-            -d WallMotion.desktop -i wallmotion.png
+            -e wallmotion-rs/target/release/wallmotion-settings \
+            -e /usr/bin/ffmpeg \
+            -l /usr/lib/x86_64-linux-gnu/libmpv.so.2 \
+            -l /usr/lib/x86_64-linux-gnu/libxdo.so.3 \
+            "${EXTRA_LIBS[@]}" \
+            -d installer/linux/wallmotion-settings.desktop \
+            -i wallmotion-settings.png \
+            --plugin gtk \
+            --output appimage
 
-      - name: Build AppImage
+      - name: Smoke test (--version needs no display)
         run: |
-          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
-          chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool AppDir WallMotion-x86_64.AppImage
+          chmod +x WallMotion-x86_64.AppImage
+          ./WallMotion-x86_64.AppImage --appimage-extract > /dev/null
+          ./squashfs-root/AppRun --version
 
-      - name: Upload AppImage artifact (manual runs)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload AppImage artifact (manual/PR runs)
+        if: github.event_name != 'push'
         uses: actions/upload-artifact@v7
         with:
           name: WallMotion-x86_64.AppImage
           path: WallMotion-x86_64.AppImage
+          retention-days: 7
 
       - name: Attach AppImage to GitHub Release (tags)
         if: startsWith(github.ref, 'refs/tags/')

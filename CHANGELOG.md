@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-26
+
+### Added
+- Linux render backend (X11): the native app now sets the wallpaper
+  behind desktop icons on X11 sessions, using an override-redirect
+  desktop window painted by the in-process mpv player. Includes RandR
+  multi-monitor discovery, seamless preroll switching and X11
+  fullscreen autopause. Images are displayed through mpv so interval
+  rotation keeps working.
+
+### Notes
+- Wayland is not supported yet: the app detects a Wayland session and
+  reports it clearly instead of drawing a floating window. Use an
+  "Xorg" session on Linux for now.
+
 ## [1.2.9] - 2026-10-23
 
 ### Fixed

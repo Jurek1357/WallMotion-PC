@@ -163,7 +163,7 @@ jobs:
             echo "The native WallMotion app — no Python needed."
             echo
             echo "- **Windows:** prefer \`WallMotion-Setup-*.exe\` (installer with optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the portable \`WallMotion-Settings.exe\` + \`libmpv-2.dll\` side by side, with in-app updates."
-            echo "- **Linux:** \`wallmotion_*.deb\` (Ubuntu 24.04+; \`sudo apt install ./wallmotion_*.deb\` pulls \`ffmpeg\`, \`libmpv2\` and \`libxdo3\`), or the self-contained \`WallMotion-x86_64.AppImage\` (\`chmod +x\`, then run it)."
+            echo "- **Linux:** \`wallmotion_*.deb\` (Ubuntu 24.04+; \`sudo apt install ./wallmotion_*.deb\` pulls \`ffmpeg\`, \`libmpv2\` and \`libxdo3\`), or the self-contained \`WallMotion-x86_64.AppImage\` (\`chmod +x\`, then run it; if it won't start, install \`libfuse2\` or run it with \`--appimage-extract-and-run\`)."
             echo "- **Linux playback:** X11 session only (\"Ubuntu on Xorg\"); Wayland is detected and rejected for now."
             echo
             echo "Video playback is built in (libmpv ships next to the exe as \`libmpv-2.dll\`, installed by the Setup) — no mpv install needed."

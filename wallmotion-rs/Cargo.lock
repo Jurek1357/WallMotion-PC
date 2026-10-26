@@ -4497,6 +4497,7 @@ dependencies = [
  "image",
  "wallmotion-core",
  "windows 0.61.3",
+ "x11rb",
 ]
 
 [[package]]

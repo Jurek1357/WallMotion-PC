@@ -3,7 +3,7 @@ name = "wallmotion-win"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WallMotion Windows render surface: WorkerW discovery and video canvas"
+description = "WallMotion desktop render surface: WorkerW/GDI canvas on Windows, X11 canvas on Linux"
 
 [lib]
 name = "wallmotion_win"
@@ -14,6 +14,9 @@ path = "src/lib.rs"
 [dependencies]
 image = "0.25"
 wallmotion-core = { path = "../core" }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", features = ["randr"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [

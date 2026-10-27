@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-10-27
+
+### Changed
+- The Linux `.deb` is now fully self-contained: it installs the app under
+  `/opt/wallmotion` and bundles libmpv, ffmpeg, libxdo and the GTK runtime
+  (the same AppDir as the AppImage). The package no longer needs distro
+  `libmpv2`, `ffmpeg` or `libxdo3`, so it works on a clean desktop without
+  multimedia packages; the download is correspondingly larger.
+- The `.deb` and AppImage builds share `installer/linux/build-appdir.sh`,
+  so both bundle exactly the same libraries.
+
 ## [1.3.2] - 2026-10-27
 
 ### Fixed

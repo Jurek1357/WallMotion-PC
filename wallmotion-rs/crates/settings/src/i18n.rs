@@ -66,7 +66,7 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("no_canvas", "No desktop canvas (run on Windows)."),
             (
                 "linux_x11_only",
-                "Linux: X11 session required (Wayland is not supported yet).",
+                "Wayland session: settings work, but wallpaper playback needs an X11 session (\"Ubuntu on Xorg\").",
             ),
             ("mpv_failed", "mpv failed to start: {e}"),
             ("yt_url_first", "Paste a YouTube link first."),
@@ -197,7 +197,7 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             ("no_canvas", "Nenalezeno plátno plochy (spusť ve Windows)."),
             (
                 "linux_x11_only",
-                "Linux: vyžaduje relaci X11 (Wayland zatím není podporován).",
+                "Relace Wayland: nastavení funguje, ale přehrávání tapety vyžaduje X11 („Ubuntu on Xorg“).",
             ),
             ("mpv_failed", "mpv se nepodařilo spustit: {e}"),
             ("yt_url_first", "Nejřív vlož YouTube odkaz."),

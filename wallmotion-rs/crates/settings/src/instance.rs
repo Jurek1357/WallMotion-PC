@@ -1,7 +1,9 @@
 //! Single instance: only one settings app may run.
 //!
-//! A lock file with our PID in the temp dir; a live owner (checked via
-//! OpenProcess) means "exit quietly", a dead one means stale (take over).
+//! A lock file with our PID in the temp dir; a live owner means "exit
+//! quietly", a dead one means stale (take over). On Unix the PID is
+//! checked against `/proc` — a crashed instance used to leave a lock
+//! behind that silently blocked every later launch until reboot.
 
 use std::path::PathBuf;
 
@@ -35,6 +37,17 @@ fn take_over(path: &PathBuf) -> bool {
     }
 }
 
+/// Remove the lock if it still belongs to this process. Called on a
+/// clean exit so the next start does not depend on the liveness check.
+pub fn release_lock() {
+    let path = lock_path();
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if text.trim().parse::<u32>() == Ok(std::process::id()) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
@@ -54,10 +67,21 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(not(windows))]
 fn process_alive(pid: u32) -> bool {
-    // Best effort: a live PID file means someone is home. Stale locks
-    // clear on the next successful start after a reboot (temp dir).
-    let _ = pid;
-    std::fs::metadata(lock_path()).is_ok()
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No cheap portable liveness check: treat the lock as stale
+        // rather than blocking every later launch. The TCP command
+        // port below is still an authoritative second gate.
+        let _ = pid;
+        false
+    }
 }
 
 #[cfg(test)]
@@ -65,11 +89,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn own_lock_then_release() {
+    fn own_lock_takeover_stale_and_release() {
+        let _ = std::fs::remove_file(lock_path());
         // Takeover writes our PID; a second check in the same process
         // sees itself and takes over again (no false positive).
         assert!(!another_instance_running());
         assert!(!another_instance_running());
-        let _ = std::fs::remove_file(lock_path());
+        // A lock left by a dead PID must not block the next start.
+        std::fs::write(lock_path(), u32::MAX.to_string()).unwrap();
+        assert!(!another_instance_running());
+        assert_eq!(
+            std::fs::read_to_string(lock_path()).unwrap().trim(),
+            std::process::id().to_string()
+        );
+        release_lock();
+        assert!(!lock_path().exists());
     }
 }

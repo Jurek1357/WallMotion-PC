@@ -321,6 +321,9 @@ struct App {
     paused: bool,
     monitor: String,
     monitors: Vec<MonitorChoice>,
+    /// Wayland session detected: show a persistent banner (playback still
+    /// needs X11; the settings window is fine).
+    wayland: bool,
     pause_on_fullscreen: bool,
     pause_on_battery: bool,
     auto: wallmotion_core::autopause::AutoPause,
@@ -546,11 +549,17 @@ fn poll_battery() -> bool {
 /// True when the app runs in a Wayland session. The desktop canvas is an
 /// X11 override-redirect window; under Wayland/XWayland it would float
 /// above normal windows instead of sitting behind the icons, so playback
-/// is refused with a clear message.
-#[cfg(target_os = "linux")]
+/// is refused with a clear message. The settings window itself works.
 fn wayland_session() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
-        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("WAYLAND_DISPLAY").is_some()
+            || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 /// Reveal a folder in the system file manager. Best effort.
@@ -596,6 +605,7 @@ impl Default for App {
             paused: false,
             monitor: saved.monitor,
             monitors: discover_monitors(lang),
+            wayland: wayland_session(),
             auto: wallmotion_core::autopause::AutoPause::new(
                 saved.pause_on_fullscreen,
                 saved.pause_on_battery,
@@ -709,6 +719,10 @@ impl App {
             Err(_) => return,
         };
         if !cmd.is_object() {
+            return;
+        }
+        if cmd.get("show").and_then(|v| v.as_bool()).unwrap_or(false) {
+            show_window(ctx);
             return;
         }
         if let Some(path) = cmd.get("set").and_then(|v| v.as_str()) {
@@ -3231,6 +3245,32 @@ impl eframe::App for App {
                     }
                 });
                 ui.separator();
+                if self.wayland {
+                    let dark = self.applied_style.unwrap_or(true);
+                    let (fill, text) = if dark {
+                        (
+                            egui::Color32::from_rgb(92, 70, 20),
+                            egui::Color32::from_rgb(255, 224, 130),
+                        )
+                    } else {
+                        (
+                            egui::Color32::from_rgb(255, 246, 214),
+                            egui::Color32::from_rgb(120, 82, 0),
+                        )
+                    };
+                    egui::Frame::default()
+                        .fill(fill)
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(8.0)
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(i18n::tr(self.lang, "linux_x11_only"))
+                                    .color(text)
+                                    .strong(),
+                            );
+                        });
+                    ui.add_space(4.0);
+                }
                 if self.tab == Tab::Settings {
                     // Wallpaper-Engine style: controls left, live preview
                     // right. Narrow windows keep the stacked layout.
@@ -3623,6 +3663,12 @@ fn main() {
         println!("Sent to the running instance.");
         return;
     }
+    // Plain launch while the app is already running (e.g. clicking the
+    // desktop icon after hiding to the tray): bring the window back
+    // instead of exiting silently. Autostart must not pop up.
+    if !action && !args.minimized && remote::send_command(r#"{"show":true}"#) {
+        return;
+    }
     if instance::another_instance_running() {
         if action {
             eprintln!("Another instance is running but did not accept the command.");
@@ -3636,6 +3682,7 @@ fn main() {
         Some(rx) => rx,
         None => {
             eprintln!("Another WallMotion instance is already running.");
+            instance::release_lock();
             return;
         }
     };
@@ -3684,4 +3731,5 @@ fn main() {
     ) {
         eprintln!("settings error: {e:?}");
     }
+    instance::release_lock();
 }

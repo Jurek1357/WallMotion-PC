@@ -45,29 +45,7 @@ jobs:
         working-directory: wallmotion-rs
 
       - name: Assemble AppDir + build AppImage
-        env:
-          DEPLOY_GTK_VERSION: "3"
-          OUTPUT: WallMotion-x86_64.AppImage
-        run: |
-          cp assets/icon.png wallmotion-settings.png
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O linuxdeploy
-          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh -O linuxdeploy-plugin-gtk.sh
-          chmod +x linuxdeploy linuxdeploy-plugin-gtk.sh
-          EXTRA_LIBS=()
-          for lib in /usr/lib/x86_64-linux-gnu/libayatana-appindicator3.so.1 \
-                     /usr/lib/x86_64-linux-gnu/libappindicator3.so.1; do
-            if [ -e "$lib" ]; then EXTRA_LIBS+=(-l "$lib"); break; fi
-          done
-          ./linuxdeploy --appdir AppDir \
-            -e wallmotion-rs/target/release/wallmotion-settings \
-            -e /usr/bin/ffmpeg \
-            -l /usr/lib/x86_64-linux-gnu/libmpv.so.2 \
-            -l /usr/lib/x86_64-linux-gnu/libxdo.so.3 \
-            "${EXTRA_LIBS[@]}" \
-            -d installer/linux/wallmotion-settings.desktop \
-            -i wallmotion-settings.png \
-            --plugin gtk \
-            --output appimage
+        run: bash installer/linux/build-appdir.sh AppDir WallMotion-x86_64.AppImage
 
       - name: Smoke test (--version needs no display)
         run: |

@@ -1,10 +1,14 @@
 name: Linux preview deb
 
-# Builds a downloadable .deb for PRs so a Linux/X11 runtime test does not
-# need a public release first. Artifacts are kept for 7 days.
+# Builds a downloadable, self-contained .deb for PRs so a Linux/X11 runtime
+# test does not need a public release first. Artifacts are kept for 7 days.
 on:
   pull_request:
-    paths: ["wallmotion-rs/**", ".github/workflows/linux-preview.yml"]
+    paths:
+      - "wallmotion-rs/**"
+      - "installer/linux/**"
+      - "assets/icon.png"
+      - ".github/workflows/linux-preview.yml"
 
 jobs:
   deb:
@@ -16,24 +20,39 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev dpkg-dev liblzma-dev
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libgtk-3-bin libxdo-dev
+          sudo apt-get install -y libgdk-pixbuf-2.0-dev librsvg2-dev libgirepository1.0-dev
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
-          sudo apt-get install -y libmpv-dev
+          sudo apt-get install -y libmpv-dev ffmpeg
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
-
-      - name: Build deb (preview version)
-        run: cargo deb -p wallmotion-settings --deb-version "1.3.0~pr${{ github.event.number }}"
+      - name: Build native settings app
+        run: cargo build --release -p wallmotion-settings
         working-directory: wallmotion-rs
+
+      - name: Build self-contained AppDir
+        run: bash installer/linux/build-appdir.sh AppDir
+
+      - name: Smoke test bundle (--version needs no display)
+        run: ./AppDir/AppRun --version
+
+      - name: Package self-contained deb (preview version)
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' wallmotion-rs/Cargo.toml | head -n1)"
+          bash installer/linux/make-deb.sh "${version}~pr${{ github.event.number }}" AppDir dist
+
+      - name: Install and smoke test the deb
+        run: |
+          sudo dpkg -i dist/*.deb
+          wallmotion-settings --version
+          sudo dpkg -r wallmotion
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v7
         with:
           name: WallMotion-deb-pr${{ github.event.number }}
-          path: wallmotion-rs/target/debian/*.deb
+          path: dist/*.deb
           if-no-files-found: error
           retention-days: 7

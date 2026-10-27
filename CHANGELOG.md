@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-27
+
+### Fixed
+- Linux: a stale single-instance lock (`/tmp/wallmotion-settings.lock`)
+  left behind by a crashed or killed instance silently blocked every
+  later launch (the app thought it was already running). The lock is
+  now checked against `/proc` and removed on a clean exit, so a dead
+  owner is taken over instead of blocking forever.
+- Launching the app while it is already running (for example clicking
+  the desktop icon after hiding the window to the tray) now brings the
+  existing window back instead of exiting silently.
+
+### Changed
+- A Wayland session now opens the settings window with a persistent
+  banner explaining that wallpaper playback needs an X11 session
+  ("Ubuntu on Xorg"), instead of looking like a failed start.
+
 ## [1.3.1] - 2026-10-27
 
 ### Fixed

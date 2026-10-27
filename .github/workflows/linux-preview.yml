@@ -25,6 +25,9 @@ jobs:
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
           sudo apt-get install -y libmpv-dev ffmpeg
 
+      - name: Install headless X11 test deps
+        run: sudo apt-get install -y xvfb xauth xdotool libgl1-mesa-dri
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -47,6 +50,7 @@ jobs:
         run: |
           sudo dpkg -i dist/*.deb
           wallmotion-settings --version
+          bash installer/linux/smoke-test-deb.sh
           sudo dpkg -r wallmotion
 
       - name: Upload deb artifact

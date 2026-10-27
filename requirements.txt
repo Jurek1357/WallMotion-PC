@@ -1,5 +1,5 @@
 PySide6>=6.12.0
 pywin32>=312; sys_platform == "win32"  # jen Windows; Linux preskoci
-yt-dlp>=2026.8.19
+yt-dlp>=2026.10.21
 imageio-ffmpeg>=0.6.0  # pribalena ffmpeg binarka pro slucovani zvuku (zadna rucni instalace)
 pyinstaller>=6.22.3  # jen pro sestaveni EXE, beh appky ho nepotrebuje

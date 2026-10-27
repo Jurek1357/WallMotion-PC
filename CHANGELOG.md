@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-27
+
+### Fixed
+- Linux `.deb`: declare the `libxdo3` runtime dependency. The binary
+  links `libxdo.so.3` (via the tray/menu stack) but the package did not
+  require it, so on a clean Ubuntu the app installed and then refused
+  to start. `apt` now pulls it in automatically.
+- Linux packages are built on `ubuntu-24.04` instead of
+  `ubuntu-latest`, so a runner migration cannot silently raise the
+  glibc requirement above 2.39 (Ubuntu 24.04).
+
+### Changed
+- The Linux AppImage is now built from the native Rust app instead of
+  the frozen Python/PyInstaller bundle, matching the 1.3.0 X11 render
+  backend. libmpv, ffmpeg, libxdo and the GTK runtime are bundled, and
+  a `--version` smoke test runs on every build.
+
 ## [1.3.0] - 2026-10-26
 
 ### Added

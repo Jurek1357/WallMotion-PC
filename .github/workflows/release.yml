@@ -119,25 +119,38 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev dpkg-dev liblzma-dev
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libxdo-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libgtk-3-bin libxdo-dev
+          sudo apt-get install -y libgdk-pixbuf-2.0-dev librsvg2-dev libgirepository1.0-dev
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
-          sudo apt-get install -y libmpv-dev
+          sudo apt-get install -y libmpv-dev ffmpeg
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
-
-      - name: Build deb (version from tag)
-        run: cargo deb -p wallmotion-settings --deb-version "${GITHUB_REF_NAME#v}"
+      - name: Build native settings app
+        run: cargo build --release -p wallmotion-settings
         working-directory: wallmotion-rs
+
+      - name: Build self-contained AppDir
+        run: bash installer/linux/build-appdir.sh AppDir
+
+      - name: Smoke test bundle (--version needs no display)
+        run: ./AppDir/AppRun --version
+
+      - name: Package self-contained deb (version from tag)
+        run: bash installer/linux/make-deb.sh "${GITHUB_REF_NAME#v}" AppDir dist
+
+      - name: Install and smoke test the deb
+        run: |
+          sudo dpkg -i dist/*.deb
+          wallmotion-settings --version
+          sudo dpkg -r wallmotion
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v7
         with:
           name: WallMotion-deb
-          path: wallmotion-rs/target/debian/*.deb
+          path: dist/*.deb
 
   publish:
     needs: [build-rs, build-installer, build-deb]
@@ -163,7 +176,7 @@ jobs:
             echo "The native WallMotion app — no Python needed."
             echo
             echo "- **Windows:** prefer \`WallMotion-Setup-*.exe\` (installer with optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the portable \`WallMotion-Settings.exe\` + \`libmpv-2.dll\` side by side, with in-app updates."
-            echo "- **Linux:** \`wallmotion_*.deb\` (Ubuntu 24.04+; \`sudo apt install ./wallmotion_*.deb\` pulls \`ffmpeg\`, \`libmpv2\` and \`libxdo3\`), or the self-contained \`WallMotion-x86_64.AppImage\` (\`chmod +x\`, then run it; if it won't start, install \`libfuse2\` or run it with \`--appimage-extract-and-run\`)."
+            echo "- **Linux:** \`wallmotion_*.deb\` (Ubuntu 24.04+; self-contained — bundles libmpv, ffmpeg, libxdo and the GTK runtime, so no distro multimedia packages are needed; \`sudo apt install ./wallmotion_*.deb\`), or the self-contained \`WallMotion-x86_64.AppImage\` (\`chmod +x\`, then run it; if it won't start, install \`libfuse2\` or run it with \`--appimage-extract-and-run\`)."
             echo "- **Linux playback:** X11 session only (\"Ubuntu on Xorg\"); Wayland is detected and rejected for now."
             echo
             echo "Video playback is built in (libmpv ships next to the exe as \`libmpv-2.dll\`, installed by the Setup) — no mpv install needed."

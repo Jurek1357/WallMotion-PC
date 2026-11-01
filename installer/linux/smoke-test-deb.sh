@@ -13,7 +13,7 @@ rm -f "$TMPDIR/wallmotion-settings-debug.log"
 rm -f "$TMPDIR/wallmotion-settings.lock"
 
 status=0
-xvfb-run -a -s "-screen 0 1280x800x24" bash -c '
+xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- bash -c '
   wallmotion-settings &
   app_pid=$!
   found=0

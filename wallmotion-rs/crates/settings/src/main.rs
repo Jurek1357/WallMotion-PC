@@ -324,6 +324,10 @@ struct App {
     /// Wayland session detected: show a persistent banner (playback still
     /// needs X11; the settings window is fine).
     wayland: bool,
+    #[cfg(target_os = "linux")]
+    pump_gtk: bool,
+    #[cfg(target_os = "linux")]
+    has_tray: bool,
     pause_on_fullscreen: bool,
     pause_on_battery: bool,
     auto: wallmotion_core::autopause::AutoPause,
@@ -606,6 +610,10 @@ impl Default for App {
             monitor: saved.monitor,
             monitors: discover_monitors(lang),
             wayland: wayland_session(),
+            #[cfg(target_os = "linux")]
+            pump_gtk: false,
+            #[cfg(target_os = "linux")]
+            has_tray: false,
             auto: wallmotion_core::autopause::AutoPause::new(
                 saved.pause_on_fullscreen,
                 saved.pause_on_battery,
@@ -3012,6 +3020,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "linux")]
+        if self.pump_gtk {
+            while gtk::events_pending() {
+                gtk::main_iteration_do(false);
+            }
+        }
         heartbeat();
         // Tray menu actions (backup path; the tray thread usually wins).
         while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
@@ -3155,18 +3169,24 @@ impl eframe::App for App {
         // it (verified with examples/probe.rs). Instead we hide at the
         // Win32 level: no taskbar button, event loop untouched.
         if !self.quit_requested && ctx.input(|i| i.viewport().close_requested()) {
-            debug_log("close requested: hide to tray");
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            #[cfg(windows)]
-            {
-                if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
-                    APP_HWND.store(find_app_hwnd(), std::sync::atomic::Ordering::SeqCst);
+            #[cfg(target_os = "linux")]
+            let can_hide = self.has_tray;
+            #[cfg(not(target_os = "linux"))]
+            let can_hide = true;
+            if can_hide {
+                debug_log("close requested: hide to tray");
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                #[cfg(windows)]
+                {
+                    if APP_HWND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                        APP_HWND.store(find_app_hwnd(), std::sync::atomic::Ordering::SeqCst);
+                    }
+                    hide_app_window();
                 }
-                hide_app_window();
-            }
-            #[cfg(not(windows))]
-            {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                #[cfg(not(windows))]
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
             }
         }
         // Drag & drop overlay: shown while a file hovers over the window.
@@ -3686,7 +3706,20 @@ fn main() {
             return;
         }
     };
-    let _tray = build_tray();
+    #[cfg(target_os = "linux")]
+    let gtk_ok = std::panic::catch_unwind(gtk::init)
+        .ok()
+        .and_then(|r| r.ok())
+        .is_some();
+    #[cfg(not(target_os = "linux"))]
+    let gtk_ok = true;
+    let _tray = if gtk_ok {
+        std::panic::catch_unwind(build_tray).ok().flatten()
+    } else {
+        None
+    };
+    #[cfg(target_os = "linux")]
+    let tray_ok = _tray.is_some();
     debug_log(&format!(
         "main start action={action} server=true tray={}",
         if _tray.is_some() { "ok" } else { "FAILED" }
@@ -3723,6 +3756,11 @@ fn main() {
                 start_hidden: args.minimized && !action,
                 ..Default::default()
             };
+            #[cfg(target_os = "linux")]
+            {
+                app.pump_gtk = gtk_ok;
+                app.has_tray = tray_ok;
+            }
             if action {
                 app.apply_launch_command(&cmd);
             }

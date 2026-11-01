@@ -4479,6 +4479,7 @@ dependencies = [
  "egui",
  "embed-manifest",
  "embed-resource",
+ "gtk",
  "image",
  "rfd",
  "serde",

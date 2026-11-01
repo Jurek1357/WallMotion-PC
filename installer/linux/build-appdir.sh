@@ -77,7 +77,7 @@ fi
 
 # winit loads these with dlopen, so ldd cannot detect them.
 for lib in libxkbcommon.so.0 libxkbcommon-x11.so.0; do
-    if ! find "$appdir" -name "$lib" | grep -q .; then
+    if [ -z "$(find "$appdir" -name "$lib" -print -quit)" ]; then
         echo "linuxdeploy did not bundle $lib" >&2
         exit 1
     fi

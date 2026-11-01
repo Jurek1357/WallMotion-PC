@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux: initialize GTK before creating the tray icon. Without it the
   settings window panicked at startup (`GTK has not been initialized`)
   before the window could open.
+- Linux packages now bundle `libxkbcommon-x11`, which winit loads with
+  `dlopen`; on systems without it the settings window still failed to
+  start even after the GTK fix.
 
 ## [1.3.3] - 2026-10-27
 

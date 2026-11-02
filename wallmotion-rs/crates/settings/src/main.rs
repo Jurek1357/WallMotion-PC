@@ -17,6 +17,8 @@ mod hotkeys;
 mod i18n;
 mod instance;
 mod library;
+#[cfg(target_os = "linux")]
+mod linux_desktop;
 mod remote;
 mod theme;
 mod update;
@@ -31,10 +33,14 @@ const TRAY_QUIT_ID: &str = "quit";
 /// (with video cleanup) on its next frame.
 static TRAY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Append one line to the debug log in the temp dir. Best effort, never panics.
-fn debug_log(msg: &str) {
+/// Append one line to the persistent debug log (`$XDG_STATE_HOME/wallmotion/`
+/// on Linux, temp dir on Windows). Best effort, never panics.
+pub(crate) fn debug_log(msg: &str) {
     use std::io::Write;
-    let path = std::env::temp_dir().join("wallmotion-settings-debug.log");
+    let path = wallmotion_core::paths::app_dirs().log;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -42,6 +48,25 @@ fn debug_log(msg: &str) {
     {
         let _ = writeln!(f, "{} pid={} {msg}", chrono_stamp(), std::process::id());
     }
+}
+
+/// Log panics to the persistent log instead of only stderr (which is lost
+/// when the app is started from a desktop launcher).
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        debug_log(&format!("PANIC: {info}"));
+        default_hook(info);
+    }));
+}
+
+/// Surface a startup failure in a desktop dialog when possible.
+fn show_startup_error(message: &str) {
+    debug_log(&format!("startup error: {message}"));
+    #[cfg(target_os = "linux")]
+    linux_desktop::show_error_dialog(message);
+    #[cfg(not(target_os = "linux"))]
+    eprintln!("{message}");
 }
 
 fn chrono_stamp() -> String {
@@ -91,6 +116,7 @@ fn playback_poll_log(file: &str, paused: Option<bool>, pos: Option<f64>, eof_set
 fn show_window(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     #[cfg(windows)]
     reveal_app_window();
     ctx.request_repaint();
@@ -321,9 +347,13 @@ struct App {
     paused: bool,
     monitor: String,
     monitors: Vec<MonitorChoice>,
-    /// Wayland session detected: show a persistent banner (playback still
-    /// needs X11; the settings window is fine).
+    /// Wayland session detected: wallpapers go through the desktop's own
+    /// backend instead of the X11 canvas.
     wayland: bool,
+    #[cfg(target_os = "linux")]
+    linux_backend: linux_desktop::DesktopBackend,
+    #[cfg(target_os = "linux")]
+    linux_video: bool,
     #[cfg(target_os = "linux")]
     pump_gtk: bool,
     #[cfg(target_os = "linux")]
@@ -550,15 +580,12 @@ fn poll_battery() -> bool {
     }
 }
 
-/// True when the app runs in a Wayland session. The desktop canvas is an
-/// X11 override-redirect window; under Wayland/XWayland it would float
-/// above normal windows instead of sitting behind the icons, so playback
-/// is refused with a clear message. The settings window itself works.
+/// True when the app runs in a Wayland session. Wayland wallpapers use the
+/// desktop's own renderer (`linux_desktop`) instead of the X11 canvas.
 fn wayland_session() -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::env::var_os("WAYLAND_DISPLAY").is_some()
-            || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s.eq_ignore_ascii_case("wayland"))
+        linux_desktop::SessionInfo::detect().session.is_wayland()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -610,6 +637,10 @@ impl Default for App {
             monitor: saved.monitor,
             monitors: discover_monitors(lang),
             wayland: wayland_session(),
+            #[cfg(target_os = "linux")]
+            linux_backend: linux_desktop::DesktopBackend::detect(),
+            #[cfg(target_os = "linux")]
+            linux_video: false,
             #[cfg(target_os = "linux")]
             pump_gtk: false,
             #[cfg(target_os = "linux")]
@@ -740,9 +771,7 @@ impl App {
             }
         }
         if cmd.get("stop").and_then(|v| v.as_bool()).unwrap_or(false) {
-            // Stopping halts the rotation too (no dead "enabled but idle").
-            self.rotation_enabled = false;
-            self.stop_video();
+            self.stop_wallpaper();
         }
         if let Some(muted) = cmd.get("muted").and_then(|v| v.as_bool()) {
             self.muted = muted;
@@ -1898,9 +1927,7 @@ impl App {
                 }
             });
             if ui.button(i18n::tr(self.lang, "stop")).clicked() {
-                // Stopping halts the rotation too (no dead "enabled but idle").
-                self.rotation_enabled = false;
-                self.stop_video();
+                self.stop_wallpaper();
                 self.persist();
             }
         });
@@ -2462,14 +2489,99 @@ impl App {
         }
         // An in-flight preroll dies with the video (player + canvas).
         self.drop_pending();
+        #[cfg(target_os = "linux")]
+        {
+            self.linux_video = false;
+            self.linux_backend.stop_video();
+        }
         self.paused = false;
         self.auto_paused = false;
         self.auto.reset();
         self.status = i18n::tr(self.lang, "status_stopped");
     }
 
+    /// Stop the current wallpaper and restore the desktop's previous image
+    /// (Wayland only; X11 reveals the wallpaper below the canvas).
+    fn stop_wallpaper(&mut self) {
+        self.rotation_enabled = false;
+        self.stop_video();
+        #[cfg(target_os = "linux")]
+        if self.wayland {
+            match self.linux_backend.restore_image() {
+                Ok(true) => self.status = i18n::tr(self.lang, "restored"),
+                Ok(false) => {}
+                Err(e) => self.status = self.linux_error(e),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_video_active(&self) -> bool {
+        self.linux_video
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn linux_video_active(&self) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_banner_text(&self) -> String {
+        use linux_desktop::BackendKind;
+        let info = self.linux_backend.info();
+        let desktop = info.desktop.label();
+        let image = self.linux_backend.image_label();
+        match self.linux_backend.kind() {
+            BackendKind::X11Canvas | BackendKind::Unsupported => {
+                i18n::trf(self.lang, "linux_no_backend", &[("s", &info.description())])
+            }
+            BackendKind::Kde => i18n::trf(
+                self.lang,
+                "linux_banner_image_only",
+                &[("desktop", desktop), ("image", image)],
+            ),
+            BackendKind::Gnome | BackendKind::Wlroots => {
+                let video = self.linux_backend.video_label().unwrap_or("none");
+                i18n::trf(
+                    self.lang,
+                    "linux_banner",
+                    &[("desktop", desktop), ("image", image), ("video", video)],
+                )
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn linux_banner_text(&self) -> String {
+        String::new()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_error(&self, err: linux_desktop::BackendError) -> String {
+        use linux_desktop::BackendError;
+        match err {
+            BackendError::MissingTools(tools) => {
+                i18n::trf(self.lang, "linux_missing", &[("tools", &tools.join(", "))])
+            }
+            BackendError::NoBackend(session) => {
+                i18n::trf(self.lang, "linux_no_backend", &[("s", &session)])
+            }
+            BackendError::ImageFailed(e) => i18n::trf(self.lang, "linux_img_failed", &[("e", &e)]),
+            BackendError::VideoFailed(e) => {
+                i18n::trf(self.lang, "linux_video_failed", &[("e", &e)])
+            }
+            BackendError::HanabiMissing => i18n::tr(self.lang, "linux_hanabi_missing"),
+            BackendError::HanabiQueued => i18n::tr(self.lang, "linux_hanabi_relogin_m"),
+            BackendError::VideoUnsupported(desktop) => i18n::trf(
+                self.lang,
+                "linux_video_unsupported",
+                &[("desktop", desktop)],
+            ),
+        }
+    }
+
     fn toggle_pause(&mut self) {
-        if !self.any_running() {
+        if !self.any_running() && !self.linux_video_active() {
             return;
         }
         self.paused = !self.paused;
@@ -2479,6 +2591,10 @@ impl App {
         }
         for run in &self.extra {
             let _ = run.player.set_paused(effective);
+        }
+        #[cfg(target_os = "linux")]
+        if self.linux_video_active() {
+            self.linux_backend.set_paused(effective);
         }
         self.status = if self.paused {
             i18n::tr(self.lang, "status_paused")
@@ -2495,7 +2611,7 @@ impl App {
     /// this (looks like "video stopped even after I turned the rule
     /// off"). Never overrides the manual Pause button.
     fn refresh_autopause_after_rule_change(&mut self) {
-        if self.paused || !self.any_running() {
+        if self.paused || (!self.any_running() && !self.linux_video_active()) {
             return;
         }
         let want = wallmotion_core::autopause::should_pause(
@@ -2517,6 +2633,10 @@ impl App {
             for run in &self.pending {
                 let _ = run.player.set_paused(false);
             }
+            #[cfg(target_os = "linux")]
+            if self.linux_video_active() {
+                self.linux_backend.set_paused(false);
+            }
             self.status = i18n::tr(self.lang, "status_playing");
             debug_log("autopause off (rule disabled) -> resume");
         }
@@ -2525,7 +2645,7 @@ impl App {
     /// One autopause poll (throttled by the caller). Never overrides the
     /// manual Pause button; pauses at once, resumes after 2 clean polls.
     fn autopause_tick(&mut self) {
-        if !self.any_running() || self.paused {
+        if (!self.any_running() && !self.linux_video_active()) || self.paused {
             return;
         }
         let fullscreen = poll_fullscreen();
@@ -2542,6 +2662,10 @@ impl App {
                 for run in &self.extra {
                     let _ = run.player.set_paused(true);
                 }
+                #[cfg(target_os = "linux")]
+                if self.linux_video_active() {
+                    self.linux_backend.set_paused(true);
+                }
                 self.status = i18n::tr(self.lang, "status_autopaused");
             }
             Some(false) => {
@@ -2554,6 +2678,10 @@ impl App {
                 }
                 for run in &self.extra {
                     let _ = run.player.set_paused(false);
+                }
+                #[cfg(target_os = "linux")]
+                if self.linux_video_active() {
+                    self.linux_backend.set_paused(false);
                 }
                 self.status = i18n::tr(self.lang, "status_playing");
             }
@@ -2581,11 +2709,24 @@ impl App {
                 self.status = img_status;
                 return;
             }
-            // X11: images go through the same canvas + mpv path; mpv
-            // loops them (see `launch_video`) so the interval timer in
-            // `rotation_tick` stays in charge.
+            // Linux: Wayland uses the desktop's own image tool; X11 keeps
+            // the canvas + mpv path (mpv loops images, so the interval
+            // timer in `rotation_tick` stays in charge).
             #[cfg(target_os = "linux")]
             {
+                if self.wayland {
+                    self.stop_video();
+                    let backend = self.linux_backend.image_label();
+                    let result = self.linux_backend.set_image(&path);
+                    match result {
+                        Ok(()) => {
+                            self.status =
+                                i18n::trf(self.lang, "linux_img_ok", &[("backend", backend)]);
+                        }
+                        Err(e) => self.status = self.linux_error(e),
+                    }
+                    return;
+                }
                 if self.any_running() {
                     self.switch_video(path);
                 } else {
@@ -2919,8 +3060,17 @@ impl App {
     /// parallel: canvases first, spawns second.
     fn set_video(&mut self, path: PathBuf) {
         #[cfg(target_os = "linux")]
-        if wayland_session() {
-            self.status = i18n::tr(self.lang, "linux_x11_only");
+        if self.wayland {
+            self.stop_video();
+            let backend = self.linux_backend.video_label().unwrap_or("Wayland");
+            let result = self.linux_backend.set_video(&path, self.muted, self.volume);
+            match result {
+                Ok(()) => {
+                    self.linux_video = true;
+                    self.status = i18n::trf(self.lang, "linux_video_ok", &[("backend", backend)]);
+                }
+                Err(e) => self.status = self.linux_error(e),
+            }
             return;
         }
         if let Some(run) = self.running.take() {
@@ -2995,6 +3145,13 @@ impl App {
             let _ = run.player.set_muted(muted);
             if !muted {
                 let _ = run.player.set_volume(self.volume as f32 / 100.0);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if self.linux_video_active() {
+            self.linux_backend.set_muted(self.muted);
+            if !self.muted {
+                self.linux_backend.set_volume(self.volume);
             }
         }
     }
@@ -3284,7 +3441,7 @@ impl eframe::App for App {
                         .inner_margin(8.0)
                         .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new(i18n::tr(self.lang, "linux_x11_only"))
+                                egui::RichText::new(self.linux_banner_text())
                                     .color(text)
                                     .strong(),
                             );
@@ -3665,21 +3822,26 @@ fn build_tray() -> Option<tray_icon::TrayIcon> {
 }
 
 fn main() {
+    install_panic_hook();
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    debug_log(&format!("main start argv={argv:?}"));
     let args = match cli::parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
+            debug_log(&format!("cli parse error: {e}"));
             eprintln!("{e}\n{}", cli::usage());
             std::process::exit(2);
         }
     };
     if args.version {
+        debug_log("version requested; no display needed");
         println!("{}", wallmotion_core::VERSION);
         return;
     }
     let cmd = cli::args_to_command(&args);
     let action = cli::has_action(&args);
     if action && remote::send_command(&cmd.to_string()) {
+        debug_log("cli action forwarded to running instance");
         println!("Sent to the running instance.");
         return;
     }
@@ -3687,12 +3849,16 @@ fn main() {
     // desktop icon after hiding to the tray): bring the window back
     // instead of exiting silently. Autostart must not pop up.
     if !action && !args.minimized && remote::send_command(r#"{"show":true}"#) {
+        debug_log("plain launch: existing instance asked to show its window");
         return;
     }
     if instance::another_instance_running() {
-        if action {
-            eprintln!("Another instance is running but did not accept the command.");
-        }
+        let msg = if action {
+            "Another instance is running but did not accept the command."
+        } else {
+            "WallMotion is already running."
+        };
+        show_startup_error(msg);
         return;
     }
     // Second gate: the command port is bound exclusively, so even a
@@ -3701,29 +3867,44 @@ fn main() {
     let remote_rx = match remote::start_server() {
         Some(rx) => rx,
         None => {
-            eprintln!("Another WallMotion instance is already running.");
+            show_startup_error("Another WallMotion instance is already running.");
             instance::release_lock();
             return;
         }
     };
     #[cfg(target_os = "linux")]
-    let gtk_ok = std::panic::catch_unwind(gtk::init)
-        .ok()
-        .and_then(|r| r.ok())
-        .is_some();
+    let gtk_ok = match gtk::init() {
+        Ok(()) => {
+            debug_log("GTK initialized");
+            true
+        }
+        Err(e) => {
+            debug_log(&format!("GTK init failed: {e}"));
+            show_startup_error(&format!(
+                "GTK could not be initialized ({e}); the tray icon is disabled."
+            ));
+            false
+        }
+    };
     #[cfg(not(target_os = "linux"))]
     let gtk_ok = true;
-    let _tray = if gtk_ok {
-        std::panic::catch_unwind(build_tray).ok().flatten()
-    } else {
-        None
-    };
+    let _tray = if gtk_ok { build_tray() } else { None };
     #[cfg(target_os = "linux")]
     let tray_ok = _tray.is_some();
     debug_log(&format!(
-        "main start action={action} server=true tray={}",
+        "main start action={action} server=true gtk={} tray={}",
+        if gtk_ok { "ok" } else { "FAILED" },
         if _tray.is_some() { "ok" } else { "FAILED" }
     ));
+    #[cfg(target_os = "linux")]
+    {
+        let info = linux_desktop::SessionInfo::detect();
+        debug_log(&format!(
+            "session={} backend={:?}",
+            info.description(),
+            info.backend_kind()
+        ));
+    }
     let mut viewport = egui::ViewportBuilder::default()
         // Wide enough for the two-column layout (controls | preview)
         // right away; narrow windows stack the cards below each other.
@@ -3767,7 +3948,7 @@ fn main() {
             Ok(Box::new(app))
         }),
     ) {
-        eprintln!("settings error: {e:?}");
+        show_startup_error(&format!("Could not open the settings window: {e:?}"));
     }
     instance::release_lock();
 }

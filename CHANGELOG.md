@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a panic hook, and desktop error dialogs for startup failures.
 
 ### Fixed
+- Linux native: renderers are now also resolved from
+  `~/.local/share/wallmotion/bin` (as documented), not just `$PATH`;
+  Hanabi is found in system-wide extension directories; applying an
+  image stops a running Hanabi renderer, and Stop restores the pre-app
+  wallpaper even when playback started directly with a video.
 - Linux: initialize GTK before creating the tray icon. Without it the
   settings window panicked at startup (`GTK has not been initialized`)
   before the window could open.

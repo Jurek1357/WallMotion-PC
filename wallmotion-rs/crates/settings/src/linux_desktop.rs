@@ -384,6 +384,10 @@ impl DesktopBackend {
                     crate::debug_log("restore(gnome): no captured wallpaper state");
                     return Ok(false);
                 };
+                if saved.is_empty() {
+                    crate::debug_log("restore(gnome): captured wallpaper state is empty");
+                    return Ok(false);
+                }
                 let tool = session_tool("gsettings")
                     .ok_or_else(|| BackendError::MissingTools(vec!["gsettings"]))?;
                 for (key, raw) in saved {
@@ -408,6 +412,7 @@ impl DesktopBackend {
                 let Some(saved) = self.wlroots_saved.take() else {
                     return Ok(false);
                 };
+                self.ensure_swww_daemon()?;
                 let tool =
                     find_tool("swww").ok_or_else(|| BackendError::MissingTools(vec!["swww"]))?;
                 run_checked(
@@ -428,17 +433,8 @@ impl DesktopBackend {
     fn gnome_set_image(&mut self, path: &Path) -> Result<(), BackendError> {
         let tool = session_tool("gsettings")
             .ok_or_else(|| BackendError::MissingTools(vec!["gsettings"]))?;
-        if self.gnome_saved.is_none() {
-            let mut saved = Vec::new();
-            for key in ["picture-uri", "picture-uri-dark"] {
-                if let Ok(raw) =
-                    run_checked(Command::new(&tool).args(["get", BACKGROUND_SCHEMA, key]))
-                {
-                    saved.push((key.to_string(), raw.trim().to_string()));
-                }
-            }
-            self.gnome_saved = Some(saved);
-        }
+        self.gnome_stop_running_video();
+        self.gnome_snapshot_background(&tool);
         let uri = file_uri(path);
         for key in ["picture-uri", "picture-uri-dark"] {
             // `picture-uri-dark` does not exist on very old GNOME releases;
@@ -463,15 +459,36 @@ impl DesktopBackend {
         Ok(())
     }
 
+    fn gnome_snapshot_background(&mut self, tool: &Path) {
+        if self.gnome_saved.is_some() {
+            return;
+        }
+        let mut saved = Vec::new();
+        for key in ["picture-uri", "picture-uri-dark"] {
+            if let Ok(raw) = run_checked(Command::new(tool).args(["get", BACKGROUND_SCHEMA, key])) {
+                saved.push((key.to_string(), raw.trim().to_string()));
+            }
+        }
+        if !saved.is_empty() {
+            self.gnome_saved = Some(saved);
+        }
+    }
+
+    /// Stop a renderer that may have been left enabled by an earlier run
+    /// (or by the user) before a static image is applied over it.
+    fn gnome_stop_running_video(&mut self) {
+        if hanabi_state() == HanabiState::Enabled {
+            let _ = hanabi_set("video-path", "");
+            let _ = hanabi_disable();
+        }
+        self.hanabi_active = false;
+        self.hanabi_paused_path = None;
+    }
+
     fn wlroots_set_image(&mut self, path: &Path) -> Result<(), BackendError> {
         let tool = find_tool("swww").ok_or_else(|| BackendError::MissingTools(vec!["swww"]))?;
         self.ensure_swww_daemon()?;
-        if !self.wlroots_seen {
-            self.wlroots_seen = true;
-            let query =
-                run_checked(Command::new(&tool).arg("query")).map_err(BackendError::ImageFailed)?;
-            self.wlroots_saved = parse_swww_image(&query);
-        }
+        self.wlroots_snapshot_image();
         run_checked(
             Command::new(&tool)
                 .args(["img", "--resize", "crop"])
@@ -480,6 +497,25 @@ impl DesktopBackend {
         .map_err(BackendError::ImageFailed)?;
         crate::debug_log(&format!("swww image applied: {}", path.display()));
         Ok(())
+    }
+
+    /// Remember the image swww is currently displaying so Stop can put it
+    /// back. Only succeeds when the daemon is already running; starting a
+    /// daemon just to sample a wallpaper would create state we do not own.
+    fn wlroots_snapshot_image(&mut self) {
+        if self.wlroots_seen {
+            return;
+        }
+        let Some(tool) = find_tool("swww") else {
+            return;
+        };
+        let Ok(query) = run_checked(Command::new(tool).arg("query")) else {
+            return;
+        };
+        if let Some(saved) = parse_swww_image(&query) {
+            self.wlroots_seen = true;
+            self.wlroots_saved = Some(saved);
+        }
     }
 
     fn ensure_swww_daemon(&self) -> Result<(), BackendError> {
@@ -530,9 +566,10 @@ impl DesktopBackend {
             HanabiState::Queued => return Err(BackendError::HanabiQueued),
             HanabiState::Enabled | HanabiState::Installed => {}
         }
-        if session_tool("gsettings").is_none() {
+        let Some(tool) = session_tool("gsettings") else {
             return Err(BackendError::MissingTools(vec!["gsettings"]));
-        }
+        };
+        self.gnome_snapshot_background(&tool);
         let Some(path_str) = path.to_str() else {
             return Err(BackendError::VideoFailed(
                 "video path is not valid UTF-8".to_string(),
@@ -559,6 +596,7 @@ impl DesktopBackend {
     ) -> Result<(), BackendError> {
         let tool =
             find_tool("mpvpaper").ok_or_else(|| BackendError::MissingTools(vec!["mpvpaper"]))?;
+        self.wlroots_snapshot_image();
         let socket = ipc_socket_path();
         let _ = std::fs::remove_file(&socket);
         let opts = mpvpaper_options(muted, volume, &socket);
@@ -605,20 +643,51 @@ enum HanabiState {
     Unknown,
 }
 
-fn hanabi_dir() -> PathBuf {
-    let data_home = std::env::var_os("XDG_DATA_HOME")
+fn user_data_home() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
+        .or_else(|| {
+            std::env::var_os("HOME")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            home.join(".local").join("share")
+                .map(|home| home.join(".local").join("share"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".local").join("share"))
+}
+
+fn hanabi_dirs() -> Vec<PathBuf> {
+    let mut roots = vec![user_data_home()];
+    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
+        .filter(|v| !v.is_empty())
+        .map(|v| std::env::split_paths(&v).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            vec![
+                PathBuf::from("/usr/local/share"),
+                PathBuf::from("/usr/share"),
+            ]
         });
-    data_home
-        .join("gnome-shell")
-        .join("extensions")
-        .join(HANABI_UUID)
+    roots.extend(data_dirs.into_iter().filter(|p| !p.as_os_str().is_empty()));
+    roots
+        .into_iter()
+        .map(|root| {
+            root.join("gnome-shell")
+                .join("extensions")
+                .join(HANABI_UUID)
+        })
+        .collect()
+}
+
+fn hanabi_dir() -> PathBuf {
+    hanabi_dirs()
+        .iter()
+        .find(|dir| dir.is_dir())
+        .cloned()
+        .unwrap_or_else(|| {
+            user_data_home()
+                .join("gnome-shell")
+                .join("extensions")
+                .join(HANABI_UUID)
+        })
 }
 
 fn hanabi_state() -> HanabiState {
@@ -629,7 +698,7 @@ fn hanabi_state() -> HanabiState {
         return HanabiState::Unknown;
     };
     if !list.lines().any(|line| line.trim() == HANABI_UUID) {
-        return if hanabi_dir().is_dir() {
+        return if hanabi_dirs().iter().any(|dir| dir.is_dir()) {
             HanabiState::Queued
         } else {
             HanabiState::Missing
@@ -704,16 +773,38 @@ fn session_tool(name: &str) -> Option<PathBuf> {
     find_tool(name)
 }
 
-/// Resolve a renderer tool (swww, mpvpaper, ...) from PATH.
+/// Resolve a renderer tool (swww, mpvpaper, ...) from the user drop-in
+/// directory first, then PATH (mirrors the Python `tool_path()`).
 pub fn find_tool(name: &str) -> Option<PathBuf> {
     if name.contains('/') {
         let path = PathBuf::from(name);
         return is_executable(&path).then_some(path);
     }
+    if let Some(dir) = tool_bin_dir() {
+        let candidate = dir.join(name);
+        if is_executable(&candidate) {
+            return Some(candidate);
+        }
+    }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
         .find(|candidate| is_executable(candidate))
+}
+
+/// `$XDG_DATA_HOME/wallmotion/bin` (or `~/.local/share/wallmotion/bin`).
+fn tool_bin_dir() -> Option<PathBuf> {
+    tool_bin_dir_from(
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+fn tool_bin_dir_from(data_home: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    let data_home = data_home
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| home.map(|h| h.join(".local").join("share")))?;
+    Some(data_home.join("wallmotion").join("bin"))
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -944,6 +1035,22 @@ mod tests {
         ]));
         assert_eq!(info.backend_kind(), BackendKind::Kde);
         assert!(info.backend_kind().video_label().is_none());
+    }
+
+    #[test]
+    fn drop_in_tool_dir_uses_xdg_data_home() {
+        assert_eq!(
+            tool_bin_dir_from(Some(PathBuf::from("/data")), None).as_deref(),
+            Some(Path::new("/data/wallmotion/bin"))
+        );
+        assert_eq!(
+            tool_bin_dir_from(None, Some(PathBuf::from("/home/u"))).as_deref(),
+            Some(Path::new("/home/u/.local/share/wallmotion/bin"))
+        );
+        assert_eq!(
+            tool_bin_dir_from(Some(PathBuf::new()), Some(PathBuf::from("/home/u"))).as_deref(),
+            Some(Path::new("/home/u/.local/share/wallmotion/bin"))
+        );
     }
 
     #[test]

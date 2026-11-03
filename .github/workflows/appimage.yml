@@ -63,6 +63,16 @@ jobs:
 
       - name: Attach AppImage to GitHub Release (tags)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: WallMotion-x86_64.AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" WallMotion-x86_64.AppImage --clobber
+              exit 0
+            fi
+            echo "Waiting for release $GITHUB_REF_NAME (attempt $attempt/60)..."
+            sleep 15
+          done
+          echo "Release $GITHUB_REF_NAME was not created in time" >&2
+          exit 1

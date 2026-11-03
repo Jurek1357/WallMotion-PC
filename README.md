@@ -133,8 +133,9 @@ simply closes).
 
 Status: the Python AppImage is verified on GNOME Wayland (Ubuntu 26.04)
 — see [docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). The native
-Wayland backend is covered by unit tests and a Linux build check;
-hardware reports for GNOME/KDE/wlroots are welcome (attach
+Wayland backend is covered by unit tests, a nested wlroots smoke test
+and a packaged `.deb` install on Ubuntu 24.04; hardware reports for
+GNOME/KDE/wlroots are welcome (attach
 `~/.local/state/wallmotion/debug.log`).
 
 ### Known limitations
@@ -288,8 +289,9 @@ AppImage; nativní canvas se prostě zavře).
 
 Stav: Python AppImage je ověřený na GNOME Wayland (Ubuntu 26.04) — viz
 [docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Nativní Wayland backend
-pokrývají unit testy a Linux build check; hlášení z GNOME/KDE/wlroots
-jsou vítána (přilož `~/.local/state/wallmotion/debug.log`).
+pokrývají unit testy, smoke test v nested wlroots a instalace balíčku
+`.deb` na Ubuntu 24.04; hlášení z GNOME/KDE/wlroots jsou vítána (přilož
+`~/.local/state/wallmotion/debug.log`).
 
 ### Známá omezení
 

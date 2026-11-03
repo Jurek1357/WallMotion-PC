@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-03
+
 ### Added
 - Linux Wayland wallpaper support in the native app: GNOME (images via
   `gsettings`, video via the Hanabi extension), KDE (images only via
@@ -33,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every lock decision, so startup problems are visible in the log.
 - The settings window is focused when reopened from the tray or by a
   second launch.
+
+### Notes
+- The native Wayland backend was exercised in a nested sway session and
+  with the packaged `.deb` on a clean Ubuntu 24.04 install. Real
+  GNOME/KDE/wlroots hardware reports are still welcome (attach
+  `~/.local/state/wallmotion/debug.log`).
 
 ## [1.3.3] - 2026-10-27
 

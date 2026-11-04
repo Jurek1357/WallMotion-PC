@@ -20,7 +20,8 @@ Priorities: **P2** = next, **P3** = later / when there's demand.
   images (`plasma-apply-wallpaperimage`, no video), wlroots (`swww` +
   `mpvpaper` with mpv JSON IPC for pause/mute/volume), plus restore on
   Stop, startup dialogs and persistent logging. Linux build, clippy and
-  unit tests pass; hardware runs on GNOME/KDE/wlroots are still wanted.
+  unit tests pass; hardware runs on GNOME/KDE/wlroots are still wanted
+  (checklist: [docs/LINUX_HARDWARE_TEST.md](docs/LINUX_HARDWARE_TEST.md)).
 
 ## P3 — Bigger ideas
 

@@ -21,9 +21,10 @@ if [ ! -x "$bin" ]; then
 fi
 
 for lib in /usr/lib/x86_64-linux-gnu/libmpv.so.2 \
-           /usr/lib/x86_64-linux-gnu/libxdo.so.3; do
+           /usr/lib/x86_64-linux-gnu/libxdo.so.3 \
+           /usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so.0; do
     if [ ! -e "$lib" ]; then
-        echo "missing $lib (install libmpv-dev and libxdo-dev)" >&2
+        echo "missing $lib (install libmpv-dev, libxdo-dev and libxkbcommon-x11-0)" >&2
         exit 1
     fi
 done
@@ -51,6 +52,7 @@ args=(--appdir "$appdir"
     -e /usr/bin/ffmpeg
     -l /usr/lib/x86_64-linux-gnu/libmpv.so.2
     -l /usr/lib/x86_64-linux-gnu/libxdo.so.3
+    -l /usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so.0
     "${extra_libs[@]}"
     -d installer/linux/wallmotion-settings.desktop
     -i "$work/wallmotion-settings.png"
@@ -72,6 +74,14 @@ if [ -n "$missing" ]; then
     echo "$missing" >&2
     exit 1
 fi
+
+# winit loads these with dlopen, so ldd cannot detect them.
+for lib in libxkbcommon.so.0 libxkbcommon-x11.so.0; do
+    if [ -z "$(find "$appdir" -name "$lib" -print -quit)" ]; then
+        echo "linuxdeploy did not bundle $lib" >&2
+        exit 1
+    fi
+done
 
 if [ -n "$image" ]; then
     OUTPUT="$image" "$work/linuxdeploy" --appdir "$appdir" --output appimage

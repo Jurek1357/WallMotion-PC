@@ -1,0 +1,119 @@
+name: Linux hardware test report
+description: Report results from running WallMotion on a real Linux desktop
+title: "[Linux test] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing WallMotion on real Linux hardware. Please follow the
+        [Linux hardware test checklist](https://github.com/Jurek1357/WallMotion-PC/blob/main/docs/LINUX_HARDWARE_TEST.md)
+        and use one issue per desktop/session so results stay comparable.
+
+        Attach `~/.local/state/wallmotion/debug.log` (or paste the last ~200
+        lines). State clearly if the session is a VM, nested compositor or
+        remote desktop.
+  - type: input
+    id: version
+    attributes:
+      label: WallMotion version
+      description: Release tag or "built from source"
+      placeholder: v1.4.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - .deb package
+        - AppImage
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: session
+    attributes:
+      label: Session / desktop
+      options:
+        - X11
+        - GNOME Wayland
+        - KDE Plasma Wayland
+        - wlroots Wayland (sway, Hyprland, Wayfire, ...)
+        - Other Wayland
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      placeholder: Ubuntu 24.04.3 LTS
+    validations:
+      required: true
+  - type: input
+    id: desktop_version
+    attributes:
+      label: Desktop/compositor version
+      placeholder: GNOME Shell 49.1 / Plasma 6.4 / sway 1.10
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      placeholder: AMD Radeon RX 6800, Mesa 25.2
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste the output of the environment block from the checklist.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: passed
+    attributes:
+      label: Checklist passed
+      description: Tick everything that worked. Report the rest under failures.
+      options:
+        - label: App launches and detects the correct backend
+        - label: Static image applies and stays visible
+        - label: Video applies and plays
+        - label: Pause/resume works
+        - label: Mute/unmute works
+        - label: Volume changes work (tested while unmuted)
+        - label: Stop restores/clears the wallpaper as expected
+        - label: Switching between image and video works
+        - label: CLI reaches the running instance / single instance works
+        - label: Debug log is written
+  - type: textarea
+    id: failures
+    attributes:
+      label: Failures / unexpected behavior
+      description: Include exact steps, expected vs actual result and timestamps.
+      placeholder: "None - all checks passed"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Multiple monitors, rotation, tray, VM/nested/remote session, etc.
+  - type: textarea
+    id: debuglog
+    attributes:
+      label: Debug log
+      description: Paste the tail of ~/.local/state/wallmotion/debug.log, or attach the full file.
+      render: text
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I tested this on a real hardware session (or explained the VM/nested setup above)
+          required: true
+        - label: I attached debug.log or pasted the relevant tail
+          required: true

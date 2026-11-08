@@ -1,5 +1,8 @@
 # Linux hardware testing report
 
+> This is a historical report for the legacy Python AppImage. For the
+> current native app, use [LINUX_HARDWARE_TEST.md](LINUX_HARDWARE_TEST.md).
+
 Linux v1 was landed code-reviewed but never run on hardware
 (TODO: "Linux hardware testing matrix"). This is the first pass:
 the v1.0.5 release AppImage on a real machine, findings, fixes, and a

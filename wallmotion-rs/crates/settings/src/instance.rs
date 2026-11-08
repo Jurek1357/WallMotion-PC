@@ -10,30 +10,62 @@ use std::path::PathBuf;
 /// True when another live instance owns the app.
 pub fn another_instance_running() -> bool {
     let path = lock_path();
+    crate::debug_log(&format!("instance lock: {}", path.display()));
     let pid = match std::fs::read_to_string(&path) {
         Ok(text) => match text.trim().parse::<u32>() {
             Ok(pid) => pid,
-            Err(_) => return take_over(&path),
+            Err(e) => {
+                crate::debug_log(&format!(
+                    "instance lock: invalid contents ({e}); taking over"
+                ));
+                return take_over(&path);
+            }
         },
-        Err(_) => return take_over(&path),
+        Err(e) => {
+            crate::debug_log(&format!("instance lock: not readable ({e}); creating"));
+            return take_over(&path);
+        }
     };
     if pid == std::process::id() {
+        crate::debug_log("instance lock: owned by this process; taking over");
         return take_over(&path);
     }
     if process_alive(pid) {
+        crate::debug_log(&format!("instance lock: live owner pid={pid}"));
         return true;
     }
+    crate::debug_log(&format!(
+        "instance lock: stale owner pid={pid}; taking over"
+    ));
     take_over(&path)
 }
 
 fn lock_path() -> PathBuf {
+    #[cfg(unix)]
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        return dir.join("wallmotion-settings.lock");
+    }
     std::env::temp_dir().join("wallmotion-settings.lock")
 }
 
 fn take_over(path: &PathBuf) -> bool {
     match std::fs::write(path, std::process::id().to_string()) {
-        Ok(()) => false,
-        Err(_) => true, // cannot write: assume someone is there
+        Ok(()) => {
+            crate::debug_log(&format!(
+                "instance lock: acquired by pid={}",
+                std::process::id()
+            ));
+            false
+        }
+        Err(e) => {
+            crate::debug_log(&format!(
+                "instance lock: cannot write ({e}); assuming another instance"
+            ));
+            true // cannot write: assume someone is there
+        }
     }
 }
 
@@ -44,6 +76,9 @@ pub fn release_lock() {
     if let Ok(text) = std::fs::read_to_string(&path) {
         if text.trim().parse::<u32>() == Ok(std::process::id()) {
             let _ = std::fs::remove_file(&path);
+            crate::debug_log("instance lock: released");
+        } else {
+            crate::debug_log("instance lock: not ours; left in place");
         }
     }
 }

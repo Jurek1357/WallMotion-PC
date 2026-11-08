@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-03
+
+### Added
+- Linux Wayland wallpaper support in the native app: GNOME (images via
+  `gsettings`, video via the Hanabi extension), KDE (images only via
+  `plasma-apply-wallpaperimage`) and wlroots/sway/Hyprland (images via
+  `swww`, video via `mpvpaper`; pause/mute/volume over mpv JSON IPC).
+  Stop restores the previous wallpaper and the UI shows a per-desktop
+  capability banner.
+- Persistent debug logging (`$XDG_STATE_HOME/wallmotion/` on Linux),
+  a panic hook, and desktop error dialogs for startup failures.
+
+### Fixed
+- Linux native: renderers are now also resolved from
+  `~/.local/share/wallmotion/bin` (as documented), not just `$PATH`;
+  Hanabi is found in system-wide extension directories; applying an
+  image stops a running Hanabi renderer, and Stop restores the pre-app
+  wallpaper even when playback started directly with a video.
+- Linux: initialize GTK before creating the tray icon. Without it the
+  settings window panicked at startup (`GTK has not been initialized`)
+  before the window could open.
+- Linux packages now bundle `libxkbcommon-x11`, which winit loads with
+  `dlopen`; on systems without it the settings window still failed to
+  start even after the GTK fix.
+- Linux: keep the single-instance lock in `$XDG_RUNTIME_DIR` and log
+  every lock decision, so startup problems are visible in the log.
+- The settings window is focused when reopened from the tray or by a
+  second launch.
+
+### Notes
+- The native Wayland backend was exercised in a nested sway session and
+  with the packaged `.deb` on a clean Ubuntu 24.04 install. Real
+  GNOME/KDE/wlroots hardware reports are still welcome (attach
+  `~/.local/state/wallmotion/debug.log`).
+
 ## [1.3.3] - 2026-10-27
 
 ### Changed

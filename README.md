@@ -96,14 +96,17 @@ Place a shortcut to `WallMotion.exe` (or `main.py`) in:
 
 ### Linux support (v1)
 
-The same UI runs on Linux; rendering is delegated to system tools
-detected from `$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
+The same UI runs on Linux. The Python AppImage delegates rendering to
+system tools; the native Rust build renders X11 itself and uses the
+same system tools on Wayland. The session is detected from
+`$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
 
 | Session | Image | Video |
 |---|---|---|
-| X11 | `feh --bg-fill` | `xwinwrap` + `mpv` fullscreen |
-| Wayland + KDE / sway / Hyprland / wlroots | `plasma-apply-wallpaperimage` / `swww` | `mpvpaper` (all outputs) |
-| Wayland + GNOME | `gsettings` | via the Hanabi extension — the app offers to install it (bundled zip); it activates after sign-out/sign-in |
+| X11 | `feh --bg-fill` (AppImage) / in-process canvas (native) | `xwinwrap` + `mpv` (AppImage) / in-process libmpv (native) |
+| Wayland + KDE | `plasma-apply-wallpaperimage` | not supported on Wayland — use an Xorg session |
+| Wayland + sway / Hyprland / wlroots | `swww` | `mpvpaper` (all outputs) |
+| Wayland + GNOME | `gsettings` | via the Hanabi extension — the AppImage offers to install a bundled zip; the native app expects it to be installed; it activates after sign-out/sign-in |
 
 The AppImage bundles `feh`, `mpv`, `xwinwrap`, `mpvpaper`, `swww` and
 `swww-daemon` — no manual installs on any supported session. The only
@@ -114,16 +117,27 @@ Running from source instead? Install the renderers via your package
 manager or drop them into `~/.local/share/wallmotion/bin` — bundled
 and drop-in tools are always preferred over `$PATH`.
 
+The native Rust build does not bundle renderers or install Hanabi: on
+Wayland it takes `gsettings`, `plasma-apply-wallpaperimage`, `swww`
+and `mpvpaper` from `~/.local/share/wallmotion/bin` or `$PATH`.
+GNOME video therefore needs Hanabi installed and enabled first, and
+KDE Wayland supports images only.
+
 Volume, mute and pause go through mpv JSON IPC; battery auto-pause
 reads `/sys/class/power_supply`; fullscreen auto-pause probes the
 active window on X11 via `xprop`/`xwininfo`/`xrandr` (Wayland has no
 compositor-neutral equivalent — the rule is a no-op there). Stop
-restores the previous wallpaper on GNOME (`gsettings`), X11
-(`~/.fehbg`) and wlroots (`swww query`).
+restores the previous wallpaper on GNOME (`gsettings`), wlroots
+(`swww query`) and X11 (`~/.fehbg` in the AppImage; the native canvas
+simply closes).
 
-Status: verified on GNOME Wayland (Ubuntu 26.04) — see
-[docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Reports for the other
-sessions welcome (attach `~/.local/state/wallmotion/debug.log`).
+Status: the Python AppImage is verified on GNOME Wayland (Ubuntu 26.04)
+— see [docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). The native
+Wayland backend is covered by unit tests, a nested wlroots smoke test
+and a packaged `.deb` install on Ubuntu 24.04. Hardware reports for
+GNOME/KDE/wlroots are welcome - start with the
+[Linux hardware test checklist](docs/LINUX_HARDWARE_TEST.md) and attach
+`~/.local/state/wallmotion/debug.log`.
 
 ### Known limitations
 
@@ -240,14 +254,17 @@ Zkratku na `WallMotion.exe` (nebo `main.py`) dej do:
 
 ### Podpora Linuxu (v1)
 
-Na Linuxu běží stejné UI; vykreslování řeší systémové nástroje
-detekované z `$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
+Na Linuxu běží stejné UI. Python AppImage deleguje vykreslování na
+systémové nástroje; nativní Rust build vykresluje X11 sám a na
+Waylandu používá stejné systémové nástroje. Session se detekuje z
+`$XDG_SESSION_TYPE` / `$XDG_CURRENT_DESKTOP`:
 
 | Prostředí | Obrázek | Video |
 |---|---|---|
-| X11 | `feh --bg-fill` | `xwinwrap` + `mpv` fullscreen |
-| Wayland + KDE / sway / Hyprland / wlroots | `plasma-apply-wallpaperimage` / `swww` | `mpvpaper` (všechny výstupy) |
-| Wayland + GNOME | `gsettings` | přes rozšíření Hanabi — aplikace nabídne instalaci (přibalený zip); aktivuje se po odhlášení a přihlášení |
+| X11 | `feh --bg-fill` (AppImage) / canvas v aplikaci (nativní) | `xwinwrap` + `mpv` (AppImage) / libmpv v aplikaci (nativní) |
+| Wayland + KDE | `plasma-apply-wallpaperimage` | na Waylandu nepodporováno — použij relaci Xorg |
+| Wayland + sway / Hyprland / wlroots | `swww` | `mpvpaper` (všechny výstupy) |
+| Wayland + GNOME | `gsettings` | přes rozšíření Hanabi — AppImage nabídne instalaci (přibalený zip); nativní aplikace očekává, že už je nainstalované; aktivuje se po odhlášení a přihlášení |
 
 AppImage má v sobě `feh`, `mpv`, `xwinwrap`, `mpvpaper`, `swww` a
 `swww-daemon` — žádné ruční instalace na žádné podporované session.
@@ -258,15 +275,25 @@ zdrojáku nástroje nainstaluj přes balíčkovací systém, nebo je hoď do
 `~/.local/share/wallmotion/bin` — přibalené a doplňkové nástroje mají
 přednost před `$PATH`.
 
+Nativní Rust build renderery nepřibaluje ani neinstaluje Hanabi: na
+Waylandu bere `gsettings`, `plasma-apply-wallpaperimage`, `swww`
+a `mpvpaper` z `~/.local/share/wallmotion/bin` nebo `$PATH`.
+Video na GNOME proto nejdřív potřebuje nainstalované a zapnuté Hanabi
+a KDE Wayland umí jen obrázky.
+
 Hlasitost, ztlumení a pauza jdou přes mpv JSON IPC; pauza na baterii
 čte `/sys/class/power_supply`; pauza na fullscreen na X11 zjišťuje
 aktivní okno přes `xprop`/`xwininfo`/`xrandr` (Wayland nemá obdobný
 protokol — tam je pravidlo no-op). Stop vrátí předchozí tapetu na
-GNOME (`gsettings`), X11 (`~/.fehbg`) a wlroots (`swww query`).
+GNOME (`gsettings`), wlroots (`swww query`) a X11 (`~/.fehbg` v
+AppImage; nativní canvas se prostě zavře).
 
-Stav: ověřeno na GNOME Wayland (Ubuntu 26.04) — viz
-[docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Hlášení z ostatních
-session vítána (přilož `~/.local/state/wallmotion/debug.log`).
+Stav: Python AppImage je ověřený na GNOME Wayland (Ubuntu 26.04) — viz
+[docs/LINUX_TESTING.md](docs/LINUX_TESTING.md). Nativní Wayland backend
+pokrývají unit testy, smoke test v nested wlroots a instalace balíčku
+`.deb` na Ubuntu 24.04. Hlášení z GNOME/KDE/wlroots jsou vítána - začni
+[checklistem pro Linux hardware](docs/LINUX_HARDWARE_TEST.md) a přilož
+`~/.local/state/wallmotion/debug.log`.
 
 ### Známá omezení
 

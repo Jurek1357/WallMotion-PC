@@ -122,7 +122,8 @@ jobs:
           sudo apt-get install -y libglib2.0-dev libgtk-3-dev libgtk-3-bin libxdo-dev
           sudo apt-get install -y libgdk-pixbuf-2.0-dev librsvg2-dev libgirepository1.0-dev
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
-          sudo apt-get install -y libmpv-dev ffmpeg
+          sudo apt-get install -y libmpv-dev ffmpeg libxkbcommon-x11-0
+          sudo apt-get install -y xvfb xauth xdotool libgl1-mesa-dri dbus-x11
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -144,6 +145,7 @@ jobs:
         run: |
           sudo dpkg -i dist/*.deb
           wallmotion-settings --version
+          bash installer/linux/smoke-test-deb.sh
           sudo dpkg -r wallmotion
 
       - name: Upload deb artifact
@@ -177,7 +179,7 @@ jobs:
             echo
             echo "- **Windows:** prefer \`WallMotion-Setup-*.exe\` (installer with optional yt-dlp/ffmpeg, Start Menu entry, autostart); or the portable \`WallMotion-Settings.exe\` + \`libmpv-2.dll\` side by side, with in-app updates."
             echo "- **Linux:** \`wallmotion_*.deb\` (Ubuntu 24.04+; self-contained — bundles libmpv, ffmpeg, libxdo and the GTK runtime, so no distro multimedia packages are needed; \`sudo apt install ./wallmotion_*.deb\`), or the self-contained \`WallMotion-x86_64.AppImage\` (\`chmod +x\`, then run it; if it won't start, install \`libfuse2\` or run it with \`--appimage-extract-and-run\`)."
-            echo "- **Linux playback:** X11 session only (\"Ubuntu on Xorg\"); Wayland is detected and rejected for now."
+            echo "- **Linux playback:** X11 (in-process), or Wayland: GNOME images via \`gsettings\` and video via Hanabi; KDE Wayland images only; wlroots/sway/Hyprland images via \`swww\` and video via \`mpvpaper\`. X11 keeps full video support."
             echo
             echo "Video playback is built in (libmpv ships next to the exe as \`libmpv-2.dll\`, installed by the Setup) — no mpv install needed."
             echo
@@ -197,5 +199,4 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*
-          generate_release_notes: true
           body_path: release-notes.md

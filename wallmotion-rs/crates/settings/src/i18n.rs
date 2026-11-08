@@ -68,6 +68,29 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
                 "linux_x11_only",
                 "Wayland session: settings work, but wallpaper playback needs an X11 session (\"Ubuntu on Xorg\").",
             ),
+            (
+                "linux_banner",
+                "{desktop} on Wayland: static images via {image}; video via {video}.",
+            ),
+            (
+                "linux_banner_image_only",
+                "{desktop} on Wayland: static images via {image}. Video wallpaper is not supported on this desktop; use an Xorg session for video.",
+            ),
+            ("linux_img_ok", "Wallpaper image set via {backend}."),
+            ("linux_img_failed", "Could not set the wallpaper image: {e}"),
+            ("linux_video_ok", "Video wallpaper started via {backend}."),
+            (
+                "linux_video_failed",
+                "Could not start video wallpaper: {e}",
+            ),
+            (
+                "linux_hanabi_missing",
+                "GNOME Wayland video needs the Hanabi extension. Install and enable it (github.com/jeffshee/gnome-ext-hanabi), then try again.",
+            ),
+            (
+                "linux_video_unsupported",
+                "Video wallpaper is not supported on {desktop} under Wayland. Use an Xorg session, GNOME with Hanabi, or a wlroots desktop with mpvpaper.",
+            ),
             ("mpv_failed", "mpv failed to start: {e}"),
             ("yt_url_first", "Paste a YouTube link first."),
             ("yt_need_tool", "yt-dlp not found — click Get yt-dlp below."),
@@ -198,6 +221,29 @@ fn extras(lang: Lang) -> &'static [(&'static str, &'static str)] {
             (
                 "linux_x11_only",
                 "Relace Wayland: nastavení funguje, ale přehrávání tapety vyžaduje X11 („Ubuntu on Xorg“).",
+            ),
+            (
+                "linux_banner",
+                "{desktop} pod Waylandem: statické obrázky přes {image}; video přes {video}.",
+            ),
+            (
+                "linux_banner_image_only",
+                "{desktop} pod Waylandem: statické obrázky přes {image}. Video tapeta tu není podporovaná; pro video použij relaci Xorg.",
+            ),
+            ("linux_img_ok", "Obrázek tapety nastaven přes {backend}."),
+            ("linux_img_failed", "Obrázek tapety se nepodařilo nastavit: {e}"),
+            ("linux_video_ok", "Video tapeta spuštěna přes {backend}."),
+            (
+                "linux_video_failed",
+                "Video tapetu se nepodařilo spustit: {e}",
+            ),
+            (
+                "linux_hanabi_missing",
+                "Video tapeta v GNOME pod Waylandem vyžaduje rozšíření Hanabi. Nainstaluj a zapni ho (github.com/jeffshee/gnome-ext-hanabi), pak to zkus znovu.",
+            ),
+            (
+                "linux_video_unsupported",
+                "Video tapeta není pod {desktop} pod Waylandem podporována. Použij relaci Xorg, GNOME s Hanabi, nebo wlroots desktop s mpvpaper.",
             ),
             ("mpv_failed", "mpv se nepodařilo spustit: {e}"),
             ("yt_url_first", "Nejřív vlož YouTube odkaz."),
@@ -465,6 +511,14 @@ mod tests {
             "fav_on",
             "refresh",
             "browse",
+            "linux_banner",
+            "linux_banner_image_only",
+            "linux_img_ok",
+            "linux_img_failed",
+            "linux_video_ok",
+            "linux_video_failed",
+            "linux_hanabi_missing",
+            "linux_video_unsupported",
         ];
         for key in keys {
             assert!(!tr(Lang::Cs, key).is_empty(), "cs:{key}");

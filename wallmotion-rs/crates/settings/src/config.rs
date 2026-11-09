@@ -5,7 +5,7 @@
 //! migration can read the Python app's file.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Where the config file lives on this machine.
@@ -24,6 +24,14 @@ pub struct AppConfig {
     /// Monitor device name (`\\.\DISPLAY1`) or empty for all monitors.
     #[serde(default)]
     pub monitor: String,
+    /// Per-monitor mode: apply a separate file per monitor instead of
+    /// the single `last_path` target.
+    #[serde(default)]
+    pub per_monitor: bool,
+    /// Per-monitor assignments: monitor name -> media path. Empty unless
+    /// per-monitor mode has been used before (kept across toggles).
+    #[serde(default)]
+    pub monitor_files: BTreeMap<String, String>,
     /// Pause video when a fullscreen app is active (games).
     #[serde(default = "default_pause_on_fullscreen")]
     pub pause_on_fullscreen: bool,
@@ -160,6 +168,8 @@ impl Default for AppConfig {
             muted: default_muted(),
             volume: default_volume(),
             monitor: String::new(),
+            per_monitor: false,
+            monitor_files: BTreeMap::new(),
             pause_on_fullscreen: default_pause_on_fullscreen(),
             pause_on_battery: false,
             rotation: RotationConfig::default(),
@@ -222,6 +232,17 @@ mod tests {
             muted: false,
             volume: 70,
             monitor: String::new(),
+            per_monitor: true,
+            monitor_files: BTreeMap::from([
+                (
+                    "\\\\.\\DISPLAY1".to_string(),
+                    "C:\\vids\\one.mp4".to_string(),
+                ),
+                (
+                    "\\\\.\\DISPLAY2".to_string(),
+                    "C:\\vids\\two.png".to_string(),
+                ),
+            ]),
             pause_on_fullscreen: true,
             pause_on_battery: false,
             rotation: RotationConfig::default(),
@@ -236,6 +257,24 @@ mod tests {
         };
         assert!(cfg.save_to(&path));
         assert_eq!(AppConfig::load_from(&path), cfg);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn old_json_without_per_monitor_loads() {
+        let dir = std::env::temp_dir().join("wallmotion-config-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("legacy.json");
+        std::fs::write(
+            &path,
+            br#"{"last_path":"C:\\vids\\a.mp4","monitor":"\\\\.\\DISPLAY1"}"#,
+        )
+        .unwrap();
+        let cfg = AppConfig::load_from(&path);
+        assert_eq!(cfg.last_path, "C:\\vids\\a.mp4");
+        assert_eq!(cfg.monitor, "\\\\.\\DISPLAY1");
+        assert!(!cfg.per_monitor);
+        assert!(cfg.monitor_files.is_empty());
         let _ = std::fs::remove_file(&path);
     }
 

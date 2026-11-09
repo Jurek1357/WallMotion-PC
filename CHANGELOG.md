@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Per-monitor wallpapers in the native app: assign a different image or
+  video to each connected monitor behind a `Per-monitor wallpapers`
+  toggle, persisted in the config. Windows uses `IDesktopWallpaper` for
+  static images and one canvas/player per monitor for video; X11 plays
+  images and videos through its canvas. Mixed image/video assignments
+  work on Windows and X11. Rotation stays off in this mode, and Wayland
+  sessions explain that per-output wallpapers are not available yet.
+  Design and remaining wlroots work:
+  [docs/PER_MONITOR.md](docs/PER_MONITOR.md).
+
 ## [1.4.0] - 2026-11-03
 
 ### Added

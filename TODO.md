@@ -45,6 +45,12 @@ Priorities: **P2** = next, **P3** = later / when there's demand.
 - [x] **Windows render:** WorkerW discovery, GDI canvas, cover-fit
   static images, per-monitor + virtual-screen targets,
   fullscreen/battery sensors.
+- [x] **Per-monitor wallpapers:** a per-monitor toggle with one
+  assignment per display, persisted in config; Windows uses
+  `IDesktopWallpaper` for static images and one canvas/player per
+  monitor for video, X11 plays images/videos through its canvas.
+  Rotation is disabled in this mode. Design and remaining Wayland work:
+  [docs/PER_MONITOR.md](docs/PER_MONITOR.md).
 - [x] **Playback:** in-process libmpv (`wallmotion-mpv` crate, `wid`
   embed, pause/mute/volume as properties, EndOfFile/PlaybackRestart
   events) — no sidecar processes, no IPC pipes, no brightness probe.

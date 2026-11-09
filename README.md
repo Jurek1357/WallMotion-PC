@@ -27,7 +27,7 @@ rewrite (~28 MB, no Python, no console popups): tabbed window
 favorites and detail panel), CZ/EN switch, light/dark theme +
 follow-system toggle,
   YouTube downloads with one-click yt-dlp/ffmpeg setup, playlist picker,
-  per-monitor selection, rotation playlist, per-wallpaper volume memory,
+  per-monitor assignments, rotation playlist, per-wallpaper volume memory,
   pause on fullscreen/battery, CLI (`--set/--stop/--mute/--volume`),
   hide-to-tray on X.
 
@@ -141,8 +141,7 @@ GNOME/KDE/wlroots are welcome - start with the
 
 ### Known limitations
 
-- Per-monitor video/image selection in the UI; true per-monitor static
-  images on Windows still use one fitted image for the whole desktop.
+- Per-monitor wallpapers work on Windows and X11. Wayland (GNOME/KDE/wlroots) still applies one wallpaper to all outputs, and rotation is disabled in per-monitor mode. Windows Stop leaves the static per-monitor images in place. See [docs/PER_MONITOR.md](docs/PER_MONITOR.md).
 - Video formats depend on the bundled libmpv (ffmpeg codecs): mp4/H.264 works out of the box; the downloader only ever fetches H.264.
 - The video wallpaper needs the app running – after a reboot, launch it again (or use autostart).
 - YouTube downloads need `yt-dlp` (`pip install -r requirements.txt` includes it, ffmpeg rides along via `imageio-ffmpeg`).
@@ -190,7 +189,7 @@ ve starších releasích a ve zdrojácích) – nativní přepis v Rustu
 (**Nastavení** + **Knihovna tapet**, mřížka ala Lively s hledáním, oblíbenými a
   detailem), přepínač CZ/EN, světlý/tmavý motiv + následování systému,
   stahování z YouTube s instalací yt-dlp/ffmpeg na jedno kliknutí,
-  výběr playlistu, výběr monitoru, rotace, paměť hlasitosti na soubor,
+  výběr playlistu, tapety pro jednotlivé monitory, rotace, paměť hlasitosti na soubor,
   pauza na fullscreen/baterii, CLI (`--set/--stop/--mute/--volume`),
   schování do traye křížkem.
 
@@ -297,8 +296,7 @@ pokrývají unit testy, smoke test v nested wlroots a instalace balíčku
 
 ### Známá omezení
 
-- V UI jde vybrat monitor pro video i obrázek; statický obrázek na
-  Windows se pořád nastavuje jeden pro celou plochu.
+- Tapety pro jednotlivé monitory fungují ve Windows a na X11. Wayland (GNOME/KDE/wlroots) pořád nastavuje jednu tapetu na všechny výstupy a v tomto režimu je vypnutá rotace. Stop ve Windows nechá statické obrázky na monitorech. Viz [docs/PER_MONITOR.md](docs/PER_MONITOR.md).
 - Formáty videa závisí na přibaleném libmpv (kodeky z ffmpeg): mp4/H.264 bez problémů; stahovač tahá jen H.264.
 - Video tapeta potřebuje běžící aplikaci – po restartu PC ji spusť znovu (nebo autostart).
 - Stahování z YouTube potřebuje `yt-dlp` (je v `requirements.txt`, ffmpeg se přibalí přes `imageio-ffmpeg`).

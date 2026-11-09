@@ -8,6 +8,7 @@
 //! plain double-click never leaves a terminal behind).
 #![windows_subsystem = "windows"]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 mod autostart;
@@ -303,6 +304,14 @@ fn tray_menu_thread(ctx: egui::Context) {
     });
 }
 
+/// One monitor and the video/image it should show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VideoTarget {
+    name: String,
+    rect: (i32, i32, i32, i32),
+    path: PathBuf,
+}
+
 struct RunningVideo {
     player: wallmotion_mpv::Player,
     canvas: isize,
@@ -310,6 +319,10 @@ struct RunningVideo {
     /// change → next switch rebuilds the canvas).
     #[cfg(any(windows, target_os = "linux"))]
     rect: (i32, i32, i32, i32),
+    /// Monitor key this runner was built for. Used to decide whether a
+    /// switch can reuse the existing layout.
+    #[cfg(any(windows, target_os = "linux"))]
+    name: String,
     /// Only the first runner plays audio; the rest stay muted (one
     /// video on every monitor must not echo).
     audible: bool,
@@ -347,6 +360,10 @@ struct App {
     paused: bool,
     monitor: String,
     monitors: Vec<MonitorChoice>,
+    /// Per-monitor mode: use `monitor_files` instead of the single
+    /// `monitor` + `file` target.
+    per_monitor: bool,
+    monitor_files: BTreeMap<String, String>,
     /// Wayland session detected: wallpapers go through the desktop's own
     /// backend instead of the X11 canvas.
     wayland: bool,
@@ -636,6 +653,8 @@ impl Default for App {
             paused: false,
             monitor: saved.monitor,
             monitors: discover_monitors(lang),
+            per_monitor: saved.per_monitor,
+            monitor_files: saved.monitor_files,
             wayland: wayland_session(),
             #[cfg(target_os = "linux")]
             linux_backend: linux_desktop::DesktopBackend::detect(),
@@ -803,6 +822,8 @@ impl App {
             muted: self.muted,
             volume: self.volume,
             monitor: self.monitor.clone(),
+            per_monitor: self.per_monitor,
+            monitor_files: self.monitor_files.clone(),
             pause_on_fullscreen: self.pause_on_fullscreen,
             pause_on_battery: self.pause_on_battery,
             rotation: config::RotationConfig {
@@ -1368,7 +1389,7 @@ impl App {
     }
 
     fn rotation_tick(&mut self) {
-        if !self.rotation_enabled || self.rotation.is_empty() {
+        if self.per_monitor || !self.rotation_enabled || self.rotation.is_empty() {
             return;
         }
         if is_image_path(&self.file) {
@@ -1473,43 +1494,105 @@ impl App {
                         .on_hover_text(self.file.clone());
                 }
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.label(i18n::tr(self.lang, "monitor_label"));
-                let current = if self.monitor.is_empty() {
-                    i18n::tr(self.lang, "monitor_all")
-                } else {
-                    self.monitors
-                        .iter()
-                        .find(|m| m.name == self.monitor)
-                        .map(|m| m.label.clone())
-                        .unwrap_or_else(|| self.monitor.clone())
-                };
-                egui::ComboBox::from_id_salt("monitor")
-                    .selected_text(current)
-                    .show_ui(ui, |ui| {
+            let mut per_monitor = self.per_monitor;
+            if ui
+                .checkbox(&mut per_monitor, i18n::tr(self.lang, "per_monitor"))
+                .on_hover_text(i18n::tr(self.lang, "per_monitor_tip"))
+                .changed()
+            {
+                self.per_monitor = per_monitor;
+                if per_monitor {
+                    // Rotation has no per-monitor cursor yet.
+                    self.rotation_enabled = false;
+                }
+                self.persist();
+            }
+            if self.per_monitor {
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button(i18n::tr(self.lang, "refresh")).clicked() {
+                        self.monitors = discover_monitors(self.lang);
+                    }
+                });
+                if self.wayland {
+                    ui.label(
+                        egui::RichText::new(i18n::tr(self.lang, "per_monitor_wayland")).weak(),
+                    );
+                }
+                for m in self.monitors.clone() {
+                    let assigned = self.monitor_files.get(&m.name).cloned().unwrap_or_default();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&m.label).strong());
+                        if assigned.is_empty() {
+                            ui.label(
+                                egui::RichText::new(i18n::tr(self.lang, "per_monitor_unassigned"))
+                                    .weak(),
+                            );
+                        } else {
+                            let name = display_file_name(&assigned);
+                            ui.label(egui::RichText::new(truncate_middle(&name, 32)).small())
+                                .on_hover_text(assigned.clone());
+                        }
                         if ui
-                            .selectable_value(
-                                &mut self.monitor,
-                                String::new(),
-                                i18n::tr(self.lang, "monitor_all"),
-                            )
-                            .changed()
+                            .button(i18n::tr(self.lang, "per_monitor_assign"))
+                            .clicked()
                         {
+                            let current = self.file.trim().to_string();
+                            if PathBuf::from(&current).is_file() {
+                                self.monitor_files.insert(m.name.clone(), current);
+                                self.persist();
+                            } else {
+                                self.status = i18n::tr(self.lang, "warn_nofile_m");
+                            }
+                        }
+                        if !assigned.is_empty()
+                            && ui
+                                .button(i18n::tr(self.lang, "per_monitor_clear"))
+                                .clicked()
+                        {
+                            self.monitor_files.remove(&m.name);
                             self.persist();
                         }
-                        for m in self.monitors.clone() {
+                    });
+                }
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(i18n::tr(self.lang, "monitor_label"));
+                    let current = if self.monitor.is_empty() {
+                        i18n::tr(self.lang, "monitor_all")
+                    } else {
+                        self.monitors
+                            .iter()
+                            .find(|m| m.name == self.monitor)
+                            .map(|m| m.label.clone())
+                            .unwrap_or_else(|| self.monitor.clone())
+                    };
+                    egui::ComboBox::from_id_salt("monitor")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
                             if ui
-                                .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
+                                .selectable_value(
+                                    &mut self.monitor,
+                                    String::new(),
+                                    i18n::tr(self.lang, "monitor_all"),
+                                )
                                 .changed()
                             {
                                 self.persist();
                             }
-                        }
-                    });
-                if ui.button(i18n::tr(self.lang, "refresh")).clicked() {
-                    self.monitors = discover_monitors(self.lang);
-                }
-            });
+                            for m in self.monitors.clone() {
+                                if ui
+                                    .selectable_value(&mut self.monitor, m.name.clone(), &m.label)
+                                    .changed()
+                                {
+                                    self.persist();
+                                }
+                            }
+                        });
+                    if ui.button(i18n::tr(self.lang, "refresh")).clicked() {
+                        self.monitors = discover_monitors(self.lang);
+                    }
+                });
+            }
             #[cfg(windows)]
             {
                 let mut auto = self.autostart;
@@ -1590,31 +1673,42 @@ impl App {
                 .default_open(true)
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .checkbox(
-                                &mut self.rotation_enabled,
-                                i18n::tr(self.lang, "rotation_enable"),
-                            )
-                            .changed()
-                        {
-                            self.last_rotation = std::time::Instant::now();
-                            if self.rotation_enabled {
-                                // Continue after the currently playing
-                                // file: manual picks don't move the
-                                // cursor, so it may sit at the end (with
-                                // repeat off rotation would then stop at
-                                // the first EOF instead of advancing).
-                                let cur = self.file.trim().to_string();
-                                self.rotation.snap_to(&cur);
-                            }
-                            // The mpv loop flag is chosen at spawn: re-spawn
-                            // a running video so the new mode applies
-                            // (looped single vs. advancing playlist).
-                            if self.any_running() && !is_image_path(&self.file) {
-                                self.set_wallpaper();
-                            }
-                            self.persist();
+                        if self.per_monitor {
+                            ui.label(
+                                egui::RichText::new(i18n::tr(
+                                    self.lang,
+                                    "per_monitor_rotation_off",
+                                ))
+                                .weak(),
+                            );
                         }
+                        ui.add_enabled_ui(!self.per_monitor, |ui| {
+                            if ui
+                                .checkbox(
+                                    &mut self.rotation_enabled,
+                                    i18n::tr(self.lang, "rotation_enable"),
+                                )
+                                .changed()
+                            {
+                                self.last_rotation = std::time::Instant::now();
+                                if self.rotation_enabled {
+                                    // Continue after the currently playing
+                                    // file: manual picks don't move the
+                                    // cursor, so it may sit at the end (with
+                                    // repeat off rotation would then stop at
+                                    // the first EOF instead of advancing).
+                                    let cur = self.file.trim().to_string();
+                                    self.rotation.snap_to(&cur);
+                                }
+                                // The mpv loop flag is chosen at spawn: re-spawn
+                                // a running video so the new mode applies
+                                // (looped single vs. advancing playlist).
+                                if self.any_running() && !is_image_path(&self.file) {
+                                    self.set_wallpaper();
+                                }
+                                self.persist();
+                            }
+                        });
                         let mut shuffle = self.rotation.shuffle();
                         if ui
                             .checkbox(&mut shuffle, i18n::tr(self.lang, "rotation_shuffle"))
@@ -1639,17 +1733,19 @@ impl App {
                             self.rotation.add(self.file.trim());
                             self.persist();
                         }
-                        if ui.button(i18n::tr(self.lang, "rotation_play")).clicked() {
-                            self.rotation_enabled = true;
-                            if let Some(path) = self.rotation.restart() {
-                                self.play_rotation_path(path);
-                            } else {
-                                self.persist();
+                        ui.add_enabled_ui(!self.per_monitor, |ui| {
+                            if ui.button(i18n::tr(self.lang, "rotation_play")).clicked() {
+                                self.rotation_enabled = true;
+                                if let Some(path) = self.rotation.restart() {
+                                    self.play_rotation_path(path);
+                                } else {
+                                    self.persist();
+                                }
                             }
-                        }
+                        });
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.add_enabled_ui(!self.rotation.is_empty(), |ui| {
+                        ui.add_enabled_ui(!self.per_monitor && !self.rotation.is_empty(), |ui| {
                             if ui.button(i18n::tr(self.lang, "rotation_skip")).clicked() {
                                 if let Some(path) = self.rotation.next_file() {
                                     self.play_rotation_path(path);
@@ -2690,6 +2786,10 @@ impl App {
     }
 
     fn set_wallpaper(&mut self) {
+        if self.per_monitor {
+            self.set_per_monitor_wallpaper();
+            return;
+        }
         let path = PathBuf::from(self.file.trim());
         if !path.is_file() {
             self.stop_video();
@@ -2744,6 +2844,69 @@ impl App {
         }
     }
 
+    /// Apply every monitor's own assignment. Wayland backends are
+    /// all-output, and Windows static images still need the global API, so
+    /// both cases stop with an explicit status instead of applying the
+    /// wrong file everywhere.
+    fn set_per_monitor_wallpaper(&mut self) {
+        #[cfg(target_os = "linux")]
+        if self.wayland {
+            self.status = i18n::tr(self.lang, "per_monitor_wayland");
+            return;
+        }
+        #[cfg(any(windows, target_os = "linux"))]
+        let targets = self.per_monitor_targets();
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let targets: Vec<VideoTarget> = Vec::new();
+        if targets.is_empty() {
+            self.status = i18n::tr(self.lang, "per_monitor_none");
+            return;
+        }
+        for target in &targets {
+            if !target.path.is_file() {
+                self.status = i18n::tr(self.lang, "warn_nofile_m");
+                return;
+            }
+        }
+        self.rotation_enabled = false;
+        #[cfg(windows)]
+        {
+            let (images, videos): (Vec<VideoTarget>, Vec<VideoTarget>) = targets
+                .into_iter()
+                .partition(|t| is_image_path(&t.path.to_string_lossy()));
+            if !images.is_empty() {
+                let items: Vec<(String, PathBuf)> = images
+                    .iter()
+                    .map(|t| (t.name.clone(), t.path.clone()))
+                    .collect();
+                if !wallmotion_win::wallpaper::set_static_wallpapers(&items) {
+                    self.status = i18n::tr(self.lang, "img_failed");
+                    return;
+                }
+                if videos.is_empty() {
+                    self.stop_video();
+                    self.status = i18n::trf(
+                        self.lang,
+                        "per_monitor_images_set",
+                        &[("n", &images.len().to_string())],
+                    );
+                    return;
+                }
+            }
+            self.set_video_targets(videos);
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            let _ = targets;
+            self.status = i18n::tr(self.lang, "no_canvas");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // X11 plays images through the canvas/mpv path too.
+            self.set_video_targets(targets);
+        }
+    }
+
     #[cfg(any(windows, target_os = "linux"))]
     fn selected_rect(&self) -> (i32, i32, i32, i32) {
         if self.monitor.is_empty() {
@@ -2778,6 +2941,10 @@ impl App {
     /// "Playing behind icons (WxH at X,Y on M)" status line.
     #[cfg(any(windows, target_os = "linux"))]
     fn video_status(&self) -> String {
+        if self.per_monitor {
+            let n = usize::from(self.running.is_some()) + self.extra.len();
+            return i18n::trf(self.lang, "per_monitor_playing", &[("n", &n.to_string())]);
+        }
         let where_tag = if self.monitor.is_empty() {
             i18n::tr(self.lang, "monitor_all")
         } else {
@@ -2806,6 +2973,7 @@ impl App {
     fn launch_video(
         &mut self,
         canvas: isize,
+        name: String,
         rect: (i32, i32, i32, i32),
         path: &std::path::Path,
         muted: bool,
@@ -2836,6 +3004,7 @@ impl App {
                     player,
                     canvas,
                     rect,
+                    name,
                     audible,
                     eof: None,
                     painted: false,
@@ -2845,7 +3014,7 @@ impl App {
         }
         #[cfg(not(any(windows, target_os = "linux")))]
         {
-            let _ = (canvas, rect, path, muted, audible);
+            let _ = (canvas, name, rect, path, muted, audible);
             Err(i18n::tr(self.lang, "no_canvas"))
         }
     }
@@ -2854,32 +3023,83 @@ impl App {
         self.running.is_some() || !self.extra.is_empty()
     }
 
-    /// Target canvas rects: one per selected monitor (same video on
-    /// each), or the whole virtual screen when the monitor list is
-    /// unavailable. `monitor` empty = all monitors.
+    /// Connected monitors in the shape the pure resolver expects.
     #[cfg(any(windows, target_os = "linux"))]
-    fn target_rects(&self) -> Vec<(i32, i32, i32, i32)> {
+    fn monitor_descriptors(&self) -> Vec<wallmotion_core::monitor_targets::MonitorDescriptor> {
+        self.monitors
+            .iter()
+            .filter_map(|m| {
+                m.rect.map(
+                    |(l, t, r, b)| wallmotion_core::monitor_targets::MonitorDescriptor {
+                        name: m.name.clone(),
+                        rect: (l, t, (r - l).max(1), (b - t).max(1)),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Per-monitor targets: only connected monitors with an assignment.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn per_monitor_targets(&self) -> Vec<VideoTarget> {
+        wallmotion_core::monitor_targets::resolve_targets(
+            &self.monitor_descriptors(),
+            &self.monitor_files,
+        )
+        .into_iter()
+        .map(|t| VideoTarget {
+            name: t.name,
+            rect: t.rect,
+            path: PathBuf::from(t.path),
+        })
+        .collect()
+    }
+
+    /// Legacy targets: one path on one monitor (or all monitors), or the
+    /// whole virtual screen when the monitor list is unavailable.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn legacy_targets(&self, path: PathBuf) -> Vec<VideoTarget> {
         if !self.monitor.is_empty() {
             if let Some(m) = self.monitors.iter().find(|m| m.name == self.monitor) {
                 if let Some((l, t, r, b)) = m.rect {
-                    return vec![(l, t, (r - l).max(1), (b - t).max(1))];
+                    return vec![VideoTarget {
+                        name: m.name.clone(),
+                        rect: (l, t, (r - l).max(1), (b - t).max(1)),
+                        path,
+                    }];
                 }
             }
         } else {
-            let rects: Vec<(i32, i32, i32, i32)> = self
+            let targets: Vec<VideoTarget> = self
                 .monitors
                 .iter()
                 .filter_map(|m| {
-                    m.rect
-                        .map(|(l, t, r, b)| (l, t, (r - l).max(1), (b - t).max(1)))
+                    m.rect.map(|(l, t, r, b)| VideoTarget {
+                        name: m.name.clone(),
+                        rect: (l, t, (r - l).max(1), (b - t).max(1)),
+                        path: path.clone(),
+                    })
                 })
                 .collect();
-            if !rects.is_empty() {
-                return rects;
+            if !targets.is_empty() {
+                return targets;
             }
         }
         let (x, y, w, h) = wallmotion_win::canvas::sys::virtual_screen();
-        vec![(x, y, w, h)]
+        vec![VideoTarget {
+            name: self.monitor.clone(),
+            rect: (x, y, w, h),
+            path,
+        }]
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    fn video_plan(&self, path: &std::path::Path) -> Vec<VideoTarget> {
+        if self.per_monitor {
+            self.per_monitor_targets()
+        } else {
+            self.legacy_targets(path.to_path_buf())
+        }
     }
 
     /// Seamless switch: the successor warms up on fresh hidden
@@ -2891,16 +3111,20 @@ impl App {
             self.set_video(path);
             return;
         }
-        // Preroll iff the monitor layout is unchanged (same rects, same
-        // order); the old runners stay put until the swap.
+        // Preroll iff the monitor layout is unchanged (same monitor keys
+        // and rects, same order); files may differ, that is the point.
+        #[cfg(any(windows, target_os = "linux"))]
+        let plan = self.video_plan(&path);
         #[cfg(any(windows, target_os = "linux"))]
         let reuse = {
-            let mut olds: Vec<(i32, i32, i32, i32)> = vec![];
+            let mut olds: Vec<(String, (i32, i32, i32, i32))> = vec![];
             if let Some(ref run) = self.running {
-                olds.push(run.rect);
+                olds.push((run.name.clone(), run.rect));
             }
-            olds.extend(self.extra.iter().map(|r| r.rect));
-            olds == self.target_rects()
+            olds.extend(self.extra.iter().map(|r| (r.name.clone(), r.rect)));
+            let wanted: Vec<(String, (i32, i32, i32, i32))> =
+                plan.iter().map(|t| (t.name.clone(), t.rect)).collect();
+            olds == wanted
         };
         #[cfg(not(any(windows, target_os = "linux")))]
         let reuse = false;
@@ -2912,6 +3136,9 @@ impl App {
                 reap_runner(run);
             }
             self.drop_pending();
+            #[cfg(any(windows, target_os = "linux"))]
+            self.set_video_targets(plan);
+            #[cfg(not(any(windows, target_os = "linux")))]
             self.set_video(path);
             return;
         }
@@ -2920,7 +3147,7 @@ impl App {
         // while the old video keeps playing; the swap happens on the
         // first frame (see `commit_preroll`), so there is no gap.
         #[cfg(any(windows, target_os = "linux"))]
-        self.begin_preroll(path);
+        self.begin_preroll(plan);
         #[cfg(not(any(windows, target_os = "linux")))]
         let _ = path;
     }
@@ -2944,7 +3171,7 @@ impl App {
     /// video when nothing could start. Canvas platforms only (other
     /// platforms never reach here — `reuse` is false there).
     #[cfg(any(windows, target_os = "linux"))]
-    fn begin_preroll(&mut self, path: PathBuf) {
+    fn begin_preroll(&mut self, plan: Vec<VideoTarget>) {
         use wallmotion_win::canvas::sys as canvas;
         self.drop_pending();
         // The predecessor just hit EOF (rotation) but stays in `running`
@@ -2957,7 +3184,8 @@ impl App {
             run.eof = None;
         }
         let mut started: Vec<RunningVideo> = vec![];
-        for (i, (x, y, w, h)) in self.target_rects().into_iter().enumerate() {
+        for (i, target) in plan.into_iter().enumerate() {
+            let (x, y, w, h) = target.rect;
             let wc = match canvas::setup_wallpaper_canvas(x, y, w, h) {
                 Some(wc) => wc,
                 None => continue,
@@ -2968,8 +3196,9 @@ impl App {
             let audible = i == 0;
             match self.launch_video(
                 wc.canvas,
+                target.name,
                 (x, y, w, h),
-                &path,
+                &target.path,
                 self.muted || !audible,
                 audible,
             ) {
@@ -3055,9 +3284,8 @@ impl App {
     }
 
     /// Fresh playback of `path` on every selected monitor (first one
-    /// audible, the rest muted). Any previous runners are reaped first.
-    /// Two phases so all mpvs start back-to-back and warm up in
-    /// parallel: canvases first, spawns second.
+    /// audible, the rest muted). Wayland keeps the desktop backend path;
+    /// Windows/X11 build a per-monitor plan.
     fn set_video(&mut self, path: PathBuf) {
         #[cfg(target_os = "linux")]
         if self.wayland {
@@ -3073,67 +3301,89 @@ impl App {
             }
             return;
         }
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            let plan = self.video_plan(&path);
+            self.set_video_targets(plan);
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            let _ = path;
+            self.status = i18n::tr(self.lang, "no_canvas");
+        }
+    }
+
+    /// Fresh playback of a target list (first one audible, the rest
+    /// muted). Any previous runners are reaped first. Two phases so all
+    /// mpvs start back-to-back and warm up in parallel: canvases first,
+    /// spawns second.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn set_video_targets(&mut self, targets: Vec<VideoTarget>) {
+        use wallmotion_win::canvas::sys as canvas;
         if let Some(run) = self.running.take() {
             reap_runner(run);
         }
         for run in self.extra.drain(..) {
             reap_runner(run);
         }
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            use wallmotion_win::canvas::sys as canvas;
-            // Phase 1: canvases (window setup can reshuffle the desktop).
-            let mut stages: Vec<(isize, (i32, i32, i32, i32))> = vec![];
-            let mut failed: Option<String> = None;
-            for (x, y, w, h) in self.target_rects() {
-                match canvas::setup_wallpaper_canvas(x, y, w, h) {
-                    Some(wc) => stages.push((wc.canvas, (x, y, w, h))),
-                    None => {
-                        failed = Some(i18n::tr(self.lang, "no_canvas"));
-                        break;
-                    }
+        if targets.is_empty() {
+            self.status = i18n::tr(self.lang, "per_monitor_none");
+            return;
+        }
+        // Phase 1: canvases (window setup can reshuffle the desktop).
+        let mut stages: Vec<(isize, VideoTarget)> = vec![];
+        let mut failed: Option<String> = None;
+        for target in targets {
+            let (x, y, w, h) = target.rect;
+            match canvas::setup_wallpaper_canvas(x, y, w, h) {
+                Some(wc) => stages.push((wc.canvas, target)),
+                None => {
+                    failed = Some(i18n::tr(self.lang, "no_canvas"));
+                    break;
                 }
-            }
-            if stages.is_empty() {
-                if let Some(msg) = failed {
-                    self.status = msg;
-                }
-                return;
-            }
-            // Phase 2: spawns back-to-back (parallel warmup).
-            for (i, (canvas, rect)) in stages.into_iter().enumerate() {
-                let audible = i == 0;
-                match self.launch_video(canvas, rect, &path, self.muted || !audible, audible) {
-                    Ok(run) => {
-                        if self.running.is_none() {
-                            self.status = self.video_status();
-                            self.running = Some(run);
-                        } else {
-                            self.extra.push(run);
-                        }
-                    }
-                    Err(msg) => {
-                        canvas::destroy_canvas(canvas);
-                        failed = Some(msg);
-                        break;
-                    }
-                }
-            }
-            if self.running.is_none() {
-                if let Some(msg) = failed {
-                    self.status = msg;
-                }
-            } else {
-                if failed.is_some() {
-                    debug_log("set_video: some monitors failed to start");
-                }
-                self.arm_sync();
             }
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            let _ = path;
-            self.status = i18n::tr(self.lang, "no_canvas");
+        if stages.is_empty() {
+            if let Some(msg) = failed {
+                self.status = msg;
+            }
+            return;
+        }
+        // Phase 2: spawns back-to-back (parallel warmup).
+        for (i, (canvas, target)) in stages.into_iter().enumerate() {
+            let audible = i == 0;
+            match self.launch_video(
+                canvas,
+                target.name,
+                target.rect,
+                &target.path,
+                self.muted || !audible,
+                audible,
+            ) {
+                Ok(run) => {
+                    if self.running.is_none() {
+                        self.running = Some(run);
+                    } else {
+                        self.extra.push(run);
+                    }
+                }
+                Err(msg) => {
+                    canvas::destroy_canvas(canvas);
+                    failed = Some(msg);
+                    break;
+                }
+            }
+        }
+        if self.running.is_none() {
+            if let Some(msg) = failed {
+                self.status = msg;
+            }
+        } else {
+            if failed.is_some() {
+                debug_log("set_video: some monitors failed to start");
+            }
+            self.status = self.video_status();
+            self.arm_sync();
         }
     }
 

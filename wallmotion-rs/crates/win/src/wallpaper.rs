@@ -51,6 +51,13 @@ pub fn cover_fit(img: &image::DynamicImage, dst_w: u32, dst_h: u32) -> Option<im
 /// Returns the fitted path (or the original on any failure), mirroring
 /// the Python fallback behavior.
 pub fn fit_image_to_screen(image_path: &Path, width: u32, height: u32) -> PathBuf {
+    fit_image_to_file(image_path, width, height, "wallmotion-fitted.bmp")
+}
+
+/// Fit an image and save it under a caller-chosen temp file name.
+/// Used by per-monitor wallpapers so monitors cannot overwrite each
+/// other's fitted BMP.
+fn fit_image_to_file(image_path: &Path, width: u32, height: u32, file_name: &str) -> PathBuf {
     let fallback = || image_path.to_path_buf();
     if width == 0 || height == 0 {
         return fallback();
@@ -64,7 +71,7 @@ pub fn fit_image_to_screen(image_path: &Path, width: u32, height: u32) -> PathBu
         None => return fallback(),
     };
     let mut out = std::env::temp_dir();
-    out.push("wallmotion-fitted.bmp");
+    out.push(file_name);
     match fitted.save(&out) {
         Ok(()) => out,
         Err(_) => fallback(),
@@ -88,6 +95,71 @@ pub fn set_static_wallpaper(image_path: &Path) -> bool {
         )
         .is_ok()
     }
+}
+
+/// Set one static image per monitor through `IDesktopWallpaper`.
+///
+/// `assignments` uses the same `\\.\DISPLAYx` names as
+/// `canvas::sys::list_monitors()`. Images are cover-fitted per monitor;
+/// false means COM setup, monitor matching or one of the writes failed.
+#[cfg(windows)]
+pub fn set_static_wallpapers(assignments: &[(String, PathBuf)]) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{DesktopWallpaper, IDesktopWallpaper};
+    if assignments.is_empty() {
+        return false;
+    }
+    let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let ok = (|| -> Option<()> {
+        let desktop: IDesktopWallpaper =
+            unsafe { CoCreateInstance(&DesktopWallpaper, None, CLSCTX_ALL) }.ok()?;
+        let local = crate::canvas::sys::list_monitors();
+        let count = unsafe { desktop.GetMonitorDevicePathCount() }.ok()?;
+        for (index, (name, image_path)) in assignments.iter().enumerate() {
+            let monitor = local.iter().find(|m| &m.name == name)?;
+            let mut device_path: Option<String> = None;
+            for i in 0..count {
+                let device = unsafe { desktop.GetMonitorDevicePathAt(i) }.ok()?;
+                let text = unsafe { device.to_string() }.ok();
+                let rect = unsafe { desktop.GetMonitorRECT(PCWSTR(device.0)) }.ok();
+                unsafe { CoTaskMemFree(Some(device.0 as _)) };
+                if let (Some(text), Some(rect)) = (text, rect) {
+                    if (rect.left, rect.top, rect.right, rect.bottom) == monitor.rect {
+                        device_path = Some(text);
+                        break;
+                    }
+                }
+            }
+            let device_path = device_path?;
+            let w = (monitor.rect.2 - monitor.rect.0).max(1) as u32;
+            let h = (monitor.rect.3 - monitor.rect.1).max(1) as u32;
+            let fitted =
+                fit_image_to_file(image_path, w, h, &format!("wallmotion-fitted-{index}.bmp"));
+            let monitor_wide: Vec<u16> = device_path
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let image_wide: Vec<u16> = fitted
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            unsafe {
+                desktop.SetWallpaper(PCWSTR(monitor_wide.as_ptr()), PCWSTR(image_wide.as_ptr()))
+            }
+            .ok()?;
+        }
+        Some(())
+    })()
+    .is_some();
+    if init.is_ok() {
+        unsafe { CoUninitialize() };
+    }
+    ok
 }
 
 /// Current desktop wallpaper path, if readable.

@@ -6,6 +6,7 @@
 //! behavior (and tests) while the Rust port grows.
 
 pub mod autopause;
+pub mod monitor_targets;
 pub mod paths;
 pub mod rotation;
 pub mod session;
